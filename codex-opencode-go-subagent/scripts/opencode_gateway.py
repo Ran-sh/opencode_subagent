@@ -146,7 +146,7 @@ def _validate_input_item(item):
         raise GatewayError("invalid_input", 400, "input item must be an object")
     itype = item.get("type")
     if itype == "message":
-        if item.get("role") not in ("user", "assistant"):
+        if item.get("role") not in ("user", "assistant", "developer"):
             raise GatewayError(
                 "unsupported_input", 400,
                 f"unsupported message role: {item.get('role')!r}",
@@ -210,6 +210,26 @@ def _message_text(content):
     if isinstance(content, str):
         return content
     return "".join(block.get("text", "") for block in content)
+
+
+def _normalize_developer_messages(request):
+    normalized = copy.deepcopy(request)
+    parts = []
+    instructions = normalized.get("instructions")
+    if isinstance(instructions, str) and instructions:
+        parts.append(instructions)
+    kept_items = []
+    for item in normalized.get("input") or []:
+        if item.get("type") == "message" and item.get("role") == "developer":
+            text = _message_text(item.get("content"))
+            if text:
+                parts.append(text)
+            continue
+        kept_items.append(item)
+    normalized["input"] = kept_items
+    if parts:
+        normalized["instructions"] = "\n\n".join(parts)
+    return normalized
 
 
 def _resolve_reasoning(reasoning_store, handle, transport):
@@ -609,6 +629,7 @@ def prepare_upstream_request(
             str(exc),
         ) from exc
     custom_tool_names = _validate_request(request)
+    request = _normalize_developer_messages(request)
     transport = spec.transport
     if transport == "chat_completions":
         body = _build_chat_body(

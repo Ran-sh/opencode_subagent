@@ -1112,6 +1112,112 @@ class RequestTranslationContractTests(unittest.TestCase):
         )
 
 
+    def test_developer_messages_fold_into_transport_instructions(self):
+        gateway = _load_production_module("opencode_gateway", _GATEWAY_PATH)
+        cases = (
+            ("deepseek-v4-flash", "chat_completions"),
+            ("qwen3.8-max", "anthropic_messages"),
+            ("gpt-5.6-luna", "responses"),
+        )
+        for model_id, transport in cases:
+            with self.subTest(model=model_id, transport=transport):
+                request = _codex_request(
+                    model=model_id,
+                    instructions="base",
+                    input=[
+                        {
+                            "type": "message",
+                            "role": "developer",
+                            "content": "dev one",
+                        },
+                        {"type": "message", "role": "developer", "content": ""},
+                        {
+                            "type": "message",
+                            "role": "developer",
+                            "content": [{"type": "input_text", "text": "dev two"}],
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        },
+                    ],
+                )
+                before = copy.deepcopy(request)
+                upstream = gateway.prepare_upstream_request(
+                    request, model=model_id, effort="max", api_key=TEST_API_KEY
+                )
+                body = upstream.body
+                expected = "base\n\ndev one\n\ndev two"
+                if transport == "chat_completions":
+                    self.assertEqual(
+                        body["messages"][0],
+                        {"role": "system", "content": expected},
+                    )
+                    roles = [item.get("role") for item in body["messages"][1:]]
+                elif transport == "anthropic_messages":
+                    self.assertEqual(body["system"], expected)
+                    roles = [item.get("role") for item in body["messages"]]
+                else:
+                    self.assertEqual(body["instructions"], expected)
+                    roles = [
+                        item.get("role")
+                        for item in body["input"]
+                        if item.get("type") == "message"
+                    ]
+                self.assertNotIn("developer", roles)
+                self.assertIn("user", roles)
+                self.assertEqual(request, before)
+        boundary = _codex_request(
+            model="deepseek-v4-flash",
+            instructions="",
+            input=[
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": "only developer",
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello"}],
+                },
+            ],
+        )
+        boundary_before = copy.deepcopy(boundary)
+        boundary_upstream = gateway.prepare_upstream_request(
+            boundary, model="deepseek-v4-flash", effort="max", api_key=TEST_API_KEY
+        )
+        self.assertEqual(
+            boundary_upstream.body["messages"][0],
+            {"role": "system", "content": "only developer"},
+        )
+        self.assertEqual(boundary, boundary_before)
+        bad_inputs = (
+            [
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [
+                        {"type": "input_image", "image_url": "https://invalid.example"}
+                    ],
+                }
+            ],
+            [{"type": "message", "role": "system", "content": "nope"}],
+        )
+        for bad_input in bad_inputs:
+            with self.subTest(bad_input=bad_input):
+                with self.assertRaises(gateway.GatewayError) as cm:
+                    gateway.prepare_upstream_request(
+                        _codex_request(model="deepseek-v4-flash", input=bad_input),
+                        model="deepseek-v4-flash",
+                        effort="max",
+                        api_key=TEST_API_KEY,
+                    )
+                self.assertEqual(cm.exception.code, "unsupported_input")
+                self.assertEqual(cm.exception.status, 400)
+
+
 class StreamTranslationContractTests(unittest.TestCase):
     """R4: upstream stream conversion to Codex-consumable SSE events."""
 
