@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import hashlib
 import importlib.util
 import json
 import sys
@@ -123,6 +124,74 @@ def _function_tool(name: str = "read_file") -> dict:
 
 def _custom_tool(name: str = "apply_patch") -> dict:
     return {"type": "custom", "name": name, "format": {"type": "object"}}
+
+
+def _namespace_tool(namespace: str = "mcp__node_repl", child: str = "js") -> dict:
+    return {
+        "type": "namespace",
+        "name": namespace,
+        "description": "Node REPL",
+        "tools": [
+            {
+                "type": "function",
+                "name": child,
+                "description": "Run JS",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"code": {"type": "string"}},
+                    "required": ["code"],
+                },
+                "strict": False,
+            }
+        ],
+    }
+
+
+def _namespace_proxy(namespace: str, child: str) -> str:
+    """ADR-1 deterministic proxy: ocg_<ns-16>_<child-24>_<sha256[:16]>."""
+
+    def slug(value: str, limit: int) -> str:
+        allowed = frozenset(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+        )
+        return "".join(ch if ch in allowed else "_" for ch in value)[:limit]
+
+    ns_slug = slug(namespace, 16)
+    child_slug = slug(child, 24)
+    digest = hashlib.sha256((namespace + "\0" + child).encode("utf-8")).hexdigest()[:16]
+    return f"ocg_{ns_slug}_{child_slug}_{digest}"
+
+
+def _namespace_request() -> dict:
+    return _codex_request(
+        model="deepseek-v4-flash",
+        instructions="Keep namespace tool history.",
+        input=[
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "run js"}],
+            },
+            {
+                "type": "function_call",
+                "namespace": "mcp__node_repl",
+                "name": "js",
+                "arguments": '{"code":"1+1"}',
+                "call_id": "call_ns",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_ns",
+                "output": '{"result":2}',
+            },
+        ],
+        tools=[
+            _function_tool("read_file"),
+            _custom_tool("apply_patch"),
+            _namespace_tool(),
+        ],
+        parallel_tool_calls=True,
+    )
 
 
 def _events_json(events, event_name: str):
@@ -1216,6 +1285,493 @@ class RequestTranslationContractTests(unittest.TestCase):
                     )
                 self.assertEqual(cm.exception.code, "unsupported_input")
                 self.assertEqual(cm.exception.status, 400)
+
+    def test_namespace_tools_round_trip(self):
+        # R1/R2: namespace definitions are flattened to deterministic proxies on
+        # request, history is remapped, and outgoing function_call items are
+        # restored to namespace + original child name on every transport.
+        gateway = _load_production_module("opencode_gateway", _GATEWAY_PATH)
+        request = _namespace_request()
+        before = copy.deepcopy(request)
+        proxy = _namespace_proxy("mcp__node_repl", "js")
+        expected_map = ((proxy, "mcp__node_repl", "js"),)
+        allowed_chars = frozenset(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+        )
+        transports = [
+            ("chat", "deepseek-v4-flash", "high"),
+            ("responses", "gpt-5.6-luna", "xhigh"),
+            ("messages", "qwen3.8-max", "high"),
+        ]
+        upstreams = []
+        for name, model, effort in transports:
+            with self.subTest(transport=name):
+                upstream = gateway.prepare_upstream_request(
+                    request, model=model, effort=effort, api_key=TEST_API_KEY
+                )
+                upstreams.append((name, upstream))
+                self.assertEqual(upstream.namespace_tool_names, expected_map)
+                self.assertEqual(request, before)
+                self.assertTrue(proxy.isascii())
+                self.assertTrue(set(proxy).issubset(allowed_chars))
+                self.assertLessEqual(len(proxy), 62)
+                body = upstream.body
+                for tool in body.get("tools") or []:
+                    self.assertNotEqual(tool.get("type"), "namespace")
+                if name == "chat":
+                    tool_names = [t["function"]["name"] for t in body["tools"]]
+                    self.assertIn("read_file", tool_names)
+                    self.assertIn("apply_patch", tool_names)
+                    self.assertIn(proxy, tool_names)
+                    self.assertNotIn("js", tool_names)
+                    call_names = []
+                    for message in body["messages"]:
+                        for call in message.get("tool_calls") or []:
+                            self.assertNotIn("namespace", call)
+                            call_names.append(call["function"]["name"])
+                    self.assertIn(proxy, call_names)
+                elif name == "messages":
+                    tool_names = [t["name"] for t in body["tools"]]
+                    self.assertIn("read_file", tool_names)
+                    self.assertIn("apply_patch", tool_names)
+                    self.assertIn(proxy, tool_names)
+                    self.assertNotIn("js", tool_names)
+                    found = False
+                    for message in body["messages"]:
+                        for block in message.get("content") or []:
+                            if block.get("type") == "tool_use" and block["name"] == proxy:
+                                found = True
+                                self.assertEqual(block["input"], {"code": "1+1"})
+                    self.assertTrue(found)
+                else:
+                    func_names = [
+                        t["name"] for t in body["tools"] if t.get("type") == "function"
+                    ]
+                    custom_names = [
+                        t["name"] for t in body["tools"] if t.get("type") == "custom"
+                    ]
+                    self.assertIn("read_file", func_names)
+                    self.assertIn(proxy, func_names)
+                    self.assertIn("apply_patch", custom_names)
+                    self.assertNotIn("js", func_names)
+                    found = False
+                    for item in body["input"]:
+                        if item.get("type") == "function_call":
+                            self.assertNotIn("namespace", item)
+                            if item["name"] == proxy:
+                                found = True
+                                self.assertEqual(item["arguments"], '{"code":"1+1"}')
+                    self.assertTrue(found)
+        # deterministic across separate preparations
+        repeat = gateway.prepare_upstream_request(
+            request, model="deepseek-v4-flash", effort="high", api_key=TEST_API_KEY
+        )
+        self.assertEqual(repeat.namespace_tool_names, expected_map)
+        self.assertEqual(request, before)
+
+        def assert_restored(events, call_id, arguments):
+            added = [
+                json.loads(event.data)["item"]
+                for event in events
+                if event.event == "response.output_item.added"
+                and json.loads(event.data)["item"].get("type") == "function_call"
+            ]
+            done = [
+                json.loads(event.data)["item"]
+                for event in events
+                if event.event == "response.output_item.done"
+                and json.loads(event.data)["item"].get("type") == "function_call"
+            ]
+            self.assertEqual(len(added), 1)
+            self.assertEqual(len(done), 1)
+            for item in added + done:
+                self.assertEqual(item["name"], "js")
+                self.assertEqual(item.get("namespace"), "mcp__node_repl")
+                self.assertEqual(item["call_id"], call_id)
+            self.assertEqual(done[0]["arguments"], arguments)
+            return added[0], done[0]
+
+        # chat stream: proxy tool call comes back as namespace + js
+        chat_events = list(
+            gateway.translate_upstream_stream(
+                iter(
+                    [
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "role": "assistant",
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": "call_ns",
+                                                "function": {
+                                                    "name": proxy,
+                                                    "arguments": '{"code":',
+                                                },
+                                            }
+                                        ],
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "tool_calls": [
+                                            {"index": 0, "function": {"arguments": '"1+1"}'}}
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                        {"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+                    ]
+                ),
+                transport="chat_completions",
+                custom_tool_names=("apply_patch",),
+                reasoning_store=None,
+                namespace_tool_names=expected_map,
+            )
+        )
+        chat_added, chat_done = assert_restored(chat_events, "call_ns", '{"code":"1+1"}')
+        self.assertEqual(chat_done["id"], chat_added["id"])
+
+        # messages stream: proxy tool_use comes back as namespace + js
+        messages_events = list(
+            gateway.translate_upstream_stream(
+                iter(
+                    [
+                        {
+                            "type": "message_start",
+                            "message": {"id": "msg_ns", "usage": {"input_tokens": 1, "output_tokens": 0}},
+                        },
+                        {
+                            "type": "content_block_start",
+                            "index": 0,
+                            "content_block": {
+                                "type": "tool_use",
+                                "id": "call_ns",
+                                "name": proxy,
+                                "input": {},
+                            },
+                        },
+                        {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "input_json_delta", "partial_json": '{"code":'},
+                        },
+                        {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "input_json_delta", "partial_json": '"1+1"}'},
+                        },
+                        {"type": "content_block_stop", "index": 0},
+                        {
+                            "type": "message_delta",
+                            "delta": {"stop_reason": "tool_use"},
+                            "usage": {"output_tokens": 1, "input_tokens": 1},
+                        },
+                        {"type": "message_stop"},
+                    ]
+                ),
+                transport="anthropic_messages",
+                custom_tool_names=("apply_patch",),
+                reasoning_store=None,
+                namespace_tool_names=expected_map,
+            )
+        )
+        msgs_added, msgs_done = assert_restored(messages_events, "call_ns", '{"code":"1+1"}')
+        self.assertEqual(msgs_done["id"], msgs_added["id"])
+
+        # responses stream: added/done and completed.response.output all restored
+        responses_events = list(
+            gateway.translate_upstream_stream(
+                iter(
+                    [
+                        {"type": "response.created", "response": {"id": "resp_ns"}},
+                        {"type": "response.in_progress", "response": {"id": "resp_ns"}},
+                        {
+                            "type": "response.output_item.added",
+                            "item": {
+                                "type": "function_call",
+                                "id": "fc_ns",
+                                "call_id": "call_ns",
+                                "name": proxy,
+                                "arguments": "",
+                            },
+                        },
+                        {
+                            "type": "response.output_item.done",
+                            "item": {
+                                "type": "function_call",
+                                "id": "fc_ns",
+                                "call_id": "call_ns",
+                                "name": proxy,
+                                "arguments": '{"code":"1+1"}',
+                            },
+                        },
+                        {
+                            "type": "response.completed",
+                            "response": {
+                                "id": "resp_ns",
+                                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                                "output": [
+                                    {
+                                        "type": "function_call",
+                                        "id": "fc_ns",
+                                        "call_id": "call_ns",
+                                        "name": proxy,
+                                        "arguments": '{"code":"1+1"}',
+                                    }
+                                ],
+                            },
+                        },
+                    ]
+                ),
+                transport="responses",
+                custom_tool_names=("apply_patch",),
+                reasoning_store=None,
+                namespace_tool_names=expected_map,
+            )
+        )
+        resp_added, resp_done = assert_restored(responses_events, "call_ns", '{"code":"1+1"}')
+        self.assertEqual(resp_done["id"], resp_added["id"])
+        completed = json.loads(responses_events[-1].data)
+        completed_output = completed["response"]["output"][0]
+        self.assertEqual(completed_output["type"], "function_call")
+        self.assertEqual(completed_output["name"], "js")
+        self.assertEqual(completed_output["namespace"], "mcp__node_repl")
+        self.assertEqual(completed_output["call_id"], "call_ns")
+        self.assertEqual(completed_output["arguments"], '{"code":"1+1"}')
+
+        # regression: an unknown ordinary name is passed through untouched
+        regression_events = list(
+            gateway.translate_upstream_stream(
+                iter(
+                    [
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": "call_rf",
+                                                "function": {
+                                                    "name": "read_file",
+                                                    "arguments": '{"path":"a.txt"}',
+                                                },
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                        {"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+                    ]
+                ),
+                transport="chat_completions",
+                custom_tool_names=(),
+                reasoning_store=None,
+                namespace_tool_names=expected_map,
+            )
+        )
+        regression_items = [
+            json.loads(event.data)["item"]
+            for event in regression_events
+            if event.event == "response.output_item.done"
+            and json.loads(event.data)["item"].get("type") == "function_call"
+        ]
+        self.assertEqual(regression_items[0]["name"], "read_file")
+        self.assertNotIn("namespace", regression_items[0])
+
+    def test_namespace_tools_reject_invalid_and_collisions(self):
+        # R3: malformed, unsupported, duplicate, colliding, or unknown namespace
+        # identities fail closed with stable codes; ordinary behavior stays.
+        gateway = _load_production_module("opencode_gateway", _GATEWAY_PATH)
+        proxy = _namespace_proxy("mcp__node_repl", "js")
+        cases = [
+            (
+                "empty_namespace_name",
+                {"name": "", "tools": [{"type": "function", "name": "js"}]},
+                "invalid_tool",
+            ),
+            (
+                "non_string_namespace_name",
+                {"name": 123, "tools": [{"type": "function", "name": "js"}]},
+                "invalid_tool",
+            ),
+            (
+                "empty_namespace_tools",
+                {"name": "mcp__node_repl", "tools": []},
+                "invalid_tool",
+            ),
+            (
+                "non_list_namespace_tools",
+                {"name": "mcp__node_repl", "tools": "nope"},
+                "invalid_tool",
+            ),
+            (
+                "empty_child_name",
+                {"name": "mcp__node_repl", "tools": [{"type": "function", "name": ""}]},
+                "invalid_tool",
+            ),
+            (
+                "non_string_child_name",
+                {"name": "mcp__node_repl", "tools": [{"type": "function", "name": 7}]},
+                "invalid_tool",
+            ),
+            (
+                "custom_child",
+                {
+                    "name": "mcp__node_repl",
+                    "tools": [{"type": "custom", "name": "js"}],
+                },
+                "unsupported_tool",
+            ),
+            (
+                "duplicate_identity",
+                {
+                    "name": "mcp__node_repl",
+                    "tools": [
+                        {"type": "function", "name": "js"},
+                        {"type": "function", "name": "js"},
+                    ],
+                },
+                "tool_name_collision",
+            ),
+            (
+                "proxy_collides_with_function",
+                None,
+                "tool_name_collision",
+            ),
+        ]
+        for case_name, ns_overrides, expected_code in cases:
+            with self.subTest(case=case_name):
+                if ns_overrides is None:
+                    tools = [
+                        _function_tool(proxy),
+                        _custom_tool("apply_patch"),
+                        _namespace_tool(),
+                    ]
+                else:
+                    namespace = dict(_namespace_tool())
+                    namespace.update(ns_overrides)
+                    tools = [_function_tool("read_file"), _custom_tool("apply_patch"), namespace]
+                with self.assertRaises(gateway.GatewayError) as cm:
+                    gateway.prepare_upstream_request(
+                        _codex_request(tools=tools),
+                        model="deepseek-v4-flash",
+                        effort="high",
+                        api_key=TEST_API_KEY,
+                    )
+                self.assertEqual(cm.exception.status, 400)
+                self.assertEqual(cm.exception.code, expected_code)
+                self.assertNotIn(TEST_API_KEY, str(cm.exception))
+        history_cases = [
+            (
+                "history_empty_namespace",
+                {
+                    "type": "function_call",
+                    "namespace": "",
+                    "name": "js",
+                    "arguments": "{}",
+                    "call_id": "call_1",
+                },
+                "invalid_input",
+            ),
+            (
+                "history_undeclared_namespace",
+                {
+                    "type": "function_call",
+                    "namespace": "mcp__node_repl",
+                    "name": "js",
+                    "arguments": "{}",
+                    "call_id": "call_1",
+                },
+                "unknown_namespace_tool",
+            ),
+        ]
+        for case_name, call, expected_code in history_cases:
+            with self.subTest(case=case_name):
+                request = _codex_request(
+                    input=[
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hi"}],
+                        },
+                        call,
+                        {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+                    ],
+                    tools=[_function_tool("read_file")],
+                )
+                with self.assertRaises(gateway.GatewayError) as cm:
+                    gateway.prepare_upstream_request(
+                        request,
+                        model="deepseek-v4-flash",
+                        effort="high",
+                        api_key=TEST_API_KEY,
+                    )
+                self.assertEqual(cm.exception.status, 400)
+                self.assertEqual(cm.exception.code, expected_code)
+        # boundary: unicode/long namespace and child yield a stable ASCII proxy
+        with self.subTest(case="unicode_boundary"):
+            long_ns = "mcp__\u6d4b\u8bd5/\u5de5\u5177 with spaces and \u00fcn\u00efcode"
+            long_child = "js-\u65b9\u6cd5-with-\u00e9mojis-and-more-than-24-chars"
+            boundary = _codex_request(
+                input=[
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "hi"}],
+                    }
+                ],
+                tools=[
+                    _function_tool("read_file"),
+                    _namespace_tool(namespace=long_ns, child=long_child),
+                ],
+            )
+            boundary_before = copy.deepcopy(boundary)
+            upstream = gateway.prepare_upstream_request(
+                boundary, model="deepseek-v4-flash", effort="high", api_key=TEST_API_KEY
+            )
+            boundary_proxy = upstream.namespace_tool_names[0][0]
+            allowed_chars = frozenset(
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+            )
+            self.assertTrue(boundary_proxy.isascii())
+            self.assertTrue(set(boundary_proxy).issubset(allowed_chars))
+            self.assertLessEqual(len(boundary_proxy), 62)
+            self.assertEqual(upstream.namespace_tool_names[0][1:], (long_ns, long_child))
+            repeat = gateway.prepare_upstream_request(
+                boundary, model="deepseek-v4-flash", effort="high", api_key=TEST_API_KEY
+            )
+            self.assertEqual(repeat.namespace_tool_names[0][0], boundary_proxy)
+            self.assertEqual(boundary, boundary_before)
+        # regressions: web_search stays unsupported; plain tools keep empty map
+        with self.subTest(case="web_search_regression"):
+            with self.assertRaises(gateway.GatewayError) as cm:
+                gateway.prepare_upstream_request(
+                    _codex_request(tools=[{"type": "web_search", "name": "web_search"}]),
+                    model="deepseek-v4-flash",
+                    effort="high",
+                    api_key=TEST_API_KEY,
+                )
+            self.assertEqual(cm.exception.code, "unsupported_tool")
+            self.assertEqual(cm.exception.status, 400)
+        with self.subTest(case="plain_custom_regression"):
+            plain = gateway.prepare_upstream_request(
+                _codex_request(tools=[_function_tool("read_file"), _custom_tool("apply_patch")]),
+                model="deepseek-v4-flash",
+                effort="high",
+                api_key=TEST_API_KEY,
+            )
+            self.assertEqual(plain.namespace_tool_names, ())
 
 
 class StreamTranslationContractTests(unittest.TestCase):

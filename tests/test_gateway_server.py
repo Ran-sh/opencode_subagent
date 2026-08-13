@@ -374,6 +374,49 @@ def _inference_headers(payload):
     }
 
 
+def _namespace_chat_sse(proxy):
+    return [
+        (
+            None,
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_ns",
+                                    "function": {"name": proxy, "arguments": '{"code":'},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
+        ),
+        (
+            None,
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "function": {"arguments": '"1+1"}'}}
+                            ]
+                        }
+                    }
+                ]
+            },
+        ),
+        (None, {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}),
+        (
+            None,
+            {"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ),
+    ]
+
+
 class GatewayServerTests(unittest.TestCase):
     """Exactly 11 RED behavior tests for the missing local HTTP/SSE gateway."""
 
@@ -624,6 +667,113 @@ class GatewayServerTests(unittest.TestCase):
                         self.assertIn(TOOL_NAME, upstream_text)
                         self.assertNotIn(LOCAL_TOKEN, upstream_text)
                         self.assertNotIn(LOCAL_TOKEN, json.dumps(headers_lc))
+
+    def test_namespace_tool_round_trip_end_to_end(self):
+        # R2: the server must carry the per-request namespace map into stream
+        # translation; a proxy tool call returns as namespace + original child.
+        module = self._server()
+        ns_tool = {
+            "type": "namespace",
+            "name": "mcp__node_repl",
+            "description": "Node REPL",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "js",
+                    "description": "Run JS",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"code": {"type": "string"}},
+                        "required": ["code"],
+                    },
+                    "strict": False,
+                }
+            ],
+        }
+        tools = [
+            {
+                "type": "function",
+                "name": TOOL_NAME,
+                "description": f"Read {TOOL_ARGS_MARKER}.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+            ns_tool,
+        ]
+
+        def script(handler, record):
+            upstream_body = json.loads(record["body"])
+            flat_names = [
+                tool["function"]["name"]
+                for tool in upstream_body["tools"]
+                if tool.get("type") == "function"
+            ]
+            handler.server.namespace_observed = {
+                "has_namespace_def": any(
+                    tool.get("type") == "namespace" for tool in upstream_body["tools"]
+                ),
+                "flat_names": flat_names,
+            }
+            proxy = next(name for name in flat_names if name.startswith("ocg_"))
+            handler._reply(
+                200,
+                {"Content-Type": "text/event-stream"},
+                _sse_bytes(_namespace_chat_sse(proxy)),
+            )
+
+        with _fake_upstream({"/chat/completions": script}) as (fake, upstream_port):
+            with _local_server(module, f"http://127.0.0.1:{upstream_port}") as (
+                srv,
+                port,
+                _thread,
+            ):
+                payload = json.dumps(
+                    _local_request("deepseek-v4-flash", "max", tools=tools)
+                ).encode("utf-8")
+                status, headers, body = _raw_request(
+                    port,
+                    "POST",
+                    "/v1/responses",
+                    _inference_headers(payload),
+                    body=payload,
+                    timeout=10.0,
+                )
+                self.assertEqual(status, 200)
+                self.assertTrue(
+                    headers.get("content-type", "").startswith("text/event-stream")
+                )
+                self.assertEqual(len(fake.records), 1)
+                self.assertFalse(fake.namespace_observed["has_namespace_def"])
+                self.assertNotIn("js", fake.namespace_observed["flat_names"])
+                events = _parse_sse(body)
+                event_names = [name for name, _ in events]
+                self.assertIn("response.created", event_names)
+                self.assertIn("response.completed", event_names)
+                added = [
+                    payload_dict["item"]
+                    for name, payload_dict in events
+                    if name == "response.output_item.added"
+                    and payload_dict["item"].get("type") == "function_call"
+                ]
+                done = [
+                    payload_dict["item"]
+                    for name, payload_dict in events
+                    if name == "response.output_item.done"
+                    and payload_dict["item"].get("type") == "function_call"
+                ]
+                self.assertEqual(len(added), 1)
+                self.assertEqual(len(done), 1)
+                for item in added + done:
+                    self.assertEqual(item["name"], "js")
+                    self.assertEqual(item.get("namespace"), "mcp__node_repl")
+                    self.assertEqual(item["call_id"], "call_ns")
+                self.assertEqual(done[0]["arguments"], '{"code":"1+1"}')
+                self.assertNotIn(LOCAL_TOKEN, json.dumps(events))
+                self.assertNotIn(API_KEY, json.dumps(events))
+                self.assertNotIn(PROMPT, json.dumps(events))
 
     def test_concurrency_cap_returns_429(self):
         # R1/R2: max_concurrent=1; second inference is 429 before upstream.
