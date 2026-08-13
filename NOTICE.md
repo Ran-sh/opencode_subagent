@@ -13,7 +13,7 @@
 ## 本仓库新增贡献
 
 - OpenCode Go 三协议兼容本地网关（chat_completions / responses / anthropic_messages）
-- 18 个首版活跃模型目录与 effort 强度策略
+- 19 个活跃模型目录与 effort 强度策略
 - reasoning 句柄与工具调用循环
 - 跨 Windows/macOS 的 Python 标准库管理脚本与测试
 

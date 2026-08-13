@@ -1,4 +1,4 @@
-"""Frozen 18-model catalog for the OpenCode Go protocol core (DP-20260811-03-V1).
+"""Frozen 19-model catalog for the OpenCode Go protocol core (DP-20260811-03-V1).
 
 Pure data/validation module: no HTTP, credentials, configuration or state.
 """
@@ -33,76 +33,80 @@ class ModelSpec:
 MODELS = {
     "deepseek-v4-flash": ModelSpec(
         "deepseek-v4-flash", "DeepSeek V4 Flash", "chat_completions",
-        ("low", "high", "max"), "max", True, 1000000, 384000, "active", "2026-08-11",
+        ("low", "high", "max"), "max", True, 1000000, 384000, "active", "2026-08-13",
     ),
     "deepseek-v4-pro": ModelSpec(
         "deepseek-v4-pro", "DeepSeek V4 Pro", "chat_completions",
-        ("high", "max"), "max", True, 1000000, 384000, "active", "2026-08-11",
+        ("high", "max"), "max", True, 1000000, 384000, "active", "2026-08-13",
     ),
     "glm-5.1": ModelSpec(
         "glm-5.1", "GLM-5.1", "chat_completions",
-        ("default",), "default", True, 202752, 32768, "active", "2026-08-11",
+        ("default",), "default", True, 202752, 32768, "active", "2026-08-13",
     ),
     "glm-5.2": ModelSpec(
         "glm-5.2", "GLM-5.2", "chat_completions",
-        ("high", "max"), "max", True, 1000000, 131072, "active", "2026-08-11",
+        ("high", "max"), "max", True, 1000000, 131072, "active", "2026-08-13",
     ),
     "gpt-5.6-luna": ModelSpec(
         "gpt-5.6-luna", "GPT 5.6 Luna", "responses",
         ("none", "low", "medium", "high", "xhigh", "max"), "max", True,
-        1050000, 128000, "active", "2026-08-11",
+        1050000, 128000, "active", "2026-08-13",
     ),
     "grok-4.5": ModelSpec(
         "grok-4.5", "Grok 4.5", "chat_completions",
-        ("low", "medium", "high"), "high", True, 500000, 500000, "active", "2026-08-11",
+        ("low", "medium", "high"), "high", True, 500000, 500000, "active", "2026-08-13",
     ),
     "hy3": ModelSpec(
         "hy3", "Hy3", "chat_completions",
-        ("none", "low", "high"), "high", True, 256000, 64000, "active", "2026-08-11",
+        ("none", "low", "high"), "high", True, 256000, 64000, "active", "2026-08-13",
     ),
     "kimi-k2.6": ModelSpec(
         "kimi-k2.6", "Kimi K2.6", "chat_completions",
-        ("default",), "default", True, 262144, 65536, "active", "2026-08-11",
+        ("default",), "default", True, 262144, 65536, "active", "2026-08-13",
     ),
     "kimi-k2.7-code": ModelSpec(
         "kimi-k2.7-code", "Kimi K2.7 Code", "chat_completions",
-        ("default",), "default", True, 262144, 262144, "active", "2026-08-11",
+        ("default",), "default", True, 262144, 262144, "active", "2026-08-13",
     ),
     "kimi-k3": ModelSpec(
         "kimi-k3", "Kimi K3", "chat_completions",
-        ("max",), "max", True, 1048576, 131072, "active", "2026-08-11",
+        ("max",), "max", True, 1048576, 131072, "active", "2026-08-13",
     ),
     "mimo-v2.5": ModelSpec(
         "mimo-v2.5", "MiMo V2.5", "chat_completions",
-        ("default",), "default", True, 1000000, 128000, "active", "2026-08-11",
+        ("default",), "default", True, 1000000, 128000, "active", "2026-08-13",
     ),
     "mimo-v2.5-pro": ModelSpec(
         "mimo-v2.5-pro", "MiMo V2.5 Pro", "chat_completions",
-        ("default",), "default", True, 1048576, 128000, "active", "2026-08-11",
+        ("default",), "default", True, 1048576, 128000, "active", "2026-08-13",
+    ),
+    "minimax-m2.5": ModelSpec(
+        "minimax-m2.5", "MiniMax M2.5", "anthropic_messages",
+        ("default",), "default", True, 204800, 65536, "active", "2026-08-13",
     ),
     "minimax-m2.7": ModelSpec(
         "minimax-m2.7", "MiniMax M2.7", "anthropic_messages",
-        ("default",), "default", True, 204800, 131072, "active", "2026-08-11",
+        ("default",), "default", True, 204800, 131072, "active", "2026-08-13",
     ),
     "minimax-m3": ModelSpec(
         "minimax-m3", "MiniMax M3", "anthropic_messages",
-        ("none", "high"), "high", True, 1000000, 131072, "active", "2026-08-11",
+        ("none", "high"), "high", True, 1000000, 131072, "active", "2026-08-13",
     ),
     "qwen3.6-plus": ModelSpec(
         "qwen3.6-plus", "Qwen3.6 Plus", "anthropic_messages",
-        ("none", "high", "max"), "max", True, 1000000, 65536, "active", "2026-08-11",
+        ("none", "high", "max"), "max", True, 1000000, 65536, "active", "2026-08-13",
     ),
     "qwen3.7-max": ModelSpec(
         "qwen3.7-max", "Qwen3.7 Max", "anthropic_messages",
-        ("none", "high", "max"), "max", True, 1000000, 65536, "active", "2026-08-11",
+        ("none", "high", "max"), "max", True, 1000000, 65536, "active", "2026-08-13",
     ),
     "qwen3.7-plus": ModelSpec(
         "qwen3.7-plus", "Qwen3.7 Plus", "anthropic_messages",
-        ("none", "high", "max"), "max", True, 1000000, 65536, "active", "2026-08-11",
+        ("none", "high", "max"), "max", True, 1000000, 65536, "active", "2026-08-13",
     ),
     "qwen3.8-max": ModelSpec(
         "qwen3.8-max", "Qwen3.8 Max", "anthropic_messages",
-        ("none", "high", "max"), "max", True, 1000000, 131072, "active", "2026-08-11",
+        ("none", "high", "max"), "max", True, 1000000, 131072, "active", "2026-08-13",
     ),
 }
 

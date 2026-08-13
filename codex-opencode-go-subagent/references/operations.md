@@ -12,12 +12,12 @@
 |---|---|---|---|
 | status | --json | 检查运行时、配置、模型目录、凭据与客户端能力 | 是 |
 | setup | --api-key-stdin [--migrate-deepseek] [--skip-live-test] | 写入配置并做 direct 探针 | 否 |
-| test | [--all-models] | 本地网关 direct 探针；--all-models 按每个模型的 default_effort 覆盖全部 18 模型 | 否 |
+| test | [--all-models] | 本地网关 direct 探针；--all-models 按每个模型的 default_effort 覆盖全部 19 模型 | 否 |
 | repair | [--api-key-stdin] [--migrate-deepseek] [--skip-live-test] | 按当前父模型重应用配置并做 direct 探针 | 否 |
 | profile list | --json | 模型×effort 组合与默认 Profile | 是 |
 | profile show | --json | 当前 Profile、配置来源与迁移需求 | 是 |
 | profile set | --model <模型> --effort <档位> [--skip-live-test] | 原子切换 Profile | 否 |
-| models list | --json | 18 模型 transport 与 effort | 是 |
+| models list | --json | 19 模型 transport 与 effort | 是 |
 | models refresh | --json | 显式刷新模型目录（事务） | 否 |
 | gateway status | --json | 查询本地网关状态 | 是 |
 | gateway start | --json | 启动本地网关 | 否 |
@@ -59,13 +59,13 @@
 
 ## 分层发布验收门
 
-- manager 层：direct 探针。当前 Profile 文本 marker（OPENCODE_TEXT_OK）与 function-tool marker（OPENCODE_TOOL_OK）；`test --all-models` 覆盖全部 18 模型。只证明本地网关往返。
+- manager 层：direct 探针。当前 Profile 文本 marker（OPENCODE_TEXT_OK）与 function-tool marker（OPENCODE_TOOL_OK）；`test --all-models` 覆盖全部 19 模型。只证明本地网关往返。
 - 父 Agent 层（发布前待执行）：三 Profile 原生 gate：
   1. deepseek-v4-flash / max
   2. gpt-5.6-luna / high
   3. qwen3.8-max / max
   每个都要求：`spawn_agent(agent_type="OpenCode", fork_context=false, ...)`；SQLite 子线程元数据（Provider、模型、effort、agent_role=OpenCode）；精确口令 `NATIVE_OPENCODE_OK`（末尾只容忍一个英文或中文句号）。
-- 未执行项：18 模型真实 Go API、三 Profile 原生 gate、macOS 实机均为发布前待验证，不得写为已通过。
+- 未执行项：19 模型真实 Go API、三 Profile 原生 gate、macOS 实机均为发布前待验证，不得写为已通过。
 
 ## 排障
 

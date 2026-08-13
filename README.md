@@ -40,7 +40,7 @@ python3 <skill-dir>/scripts/codex_opencode_go.py setup --api-key-stdin --json
 py -3 <skill-dir>/scripts/codex_opencode_go.py profile set --model gpt-5.6-luna --effort high --json
 ```
 
-切换成功后请新建 Codex 任务再使用新 profile。首版包含 18 个活跃模型；模型矩阵、允许的 effort 档位与 transport 映射见 [compatibility.md](codex-opencode-go-subagent/references/compatibility.md)。
+切换成功后请新建 Codex 任务再使用新 profile。当前冻结目录包含 19 个活跃模型；模型矩阵、允许的 effort 档位与 transport 映射见 [compatibility.md](codex-opencode-go-subagent/references/compatibility.md)。
 
 ## 稳定命令
 
@@ -80,7 +80,7 @@ python -B scripts/quick_validate.py codex-opencode-go-subagent --repo-root .
 
 ## 发布门槛（当前均待执行）
 
-1. 18 个模型各自的最小流式文本与一次工具调用；
+1. 19 个模型各自的最小流式文本与一次工具调用；
 2. `deepseek-v4-flash/max`、`gpt-5.6-luna/high`、`qwen3.8-max/max` 三个原生 `spawn_agent` gate；
 3. macOS 真机验证。
 

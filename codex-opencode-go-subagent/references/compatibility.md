@@ -14,9 +14,11 @@
 - 凭据目标名称以脚本 `--json` 输出为准；程序不打印、不回显、不写入临时文件、命令行或日志。
 - 程序不修改顶层 `model` 或顶层 `model_provider`，主任务仍使用用户原来的模型与登录方式。
 
-## 模型矩阵（18 个活跃模型，来源日期 2026-08-11）
+## 模型矩阵（19 个活跃模型，来源日期 2026-08-13）
 
 transport 固定为 `chat_completions`、`responses`、`anthropic_messages`。`effort` 一列是允许档位；`default` 是伪档位（见下）。不列出别名、旧模型或已弃用模型。
+
+OpenCode 配置使用 `opencode-go/<model-id>`；本地注册表保留不带 provider 前缀的 `<model-id>`。
 
 ### chat_completions（11）
 
@@ -40,10 +42,11 @@ transport 固定为 `chat_completions`、`responses`、`anthropic_messages`。`e
 |---|---|---|---|
 | gpt-5.6-luna | GPT 5.6 Luna | none, low, medium, high, xhigh, max | max |
 
-### anthropic_messages（6）
+### anthropic_messages（7）
 
 | 模型 ID | 显示名 | 允许 effort | 默认 |
 |---|---|---|---|
+| minimax-m2.5 | MiniMax M2.5 | default | default |
 | minimax-m2.7 | MiniMax M2.7 | default | default |
 | minimax-m3 | MiniMax M3 | none, high | high |
 | qwen3.6-plus | Qwen3.6 Plus | none, high, max | max |
@@ -85,9 +88,10 @@ transport 固定为 `chat_completions`、`responses`、`anthropic_messages`。`e
 - 真实原生派发验收由父 Agent 单独执行：`spawn_agent(agent_type="OpenCode", fork_context=false, ...)`，检查 SQLite 子线程元数据（Provider、模型、effort、agent_role=OpenCode），并确认精确口令 `NATIVE_OPENCODE_OK`。
 - 两者缺一不可；manager 的 direct 探针不等于原生验收。分层发布门见 operations.md。
 
-## 数据来源与实现引用（2026-08-11）
+## 数据来源与实现引用（2026-08-13）
 
 - https://opencode.ai/docs/zh-cn/go/
+- https://opencode.ai/docs/config/#models
 - https://opencode.ai/docs/zh-cn/zen/
 - https://opencode.ai/zen/go/v1/models
 - https://models.dev/api.json

@@ -26,7 +26,7 @@ license: MIT
 |---|---|
 | status | 只读检查运行时、配置、模型目录、凭据与能力 |
 | setup | 写入配置并做 direct 探针 |
-| test [--all-models] | 本地网关 direct 探针（默认 Profile 或全部 18 模型） |
+| test [--all-models] | 本地网关 direct 探针（默认 Profile 或全部 19 模型） |
 | repair | 按当前父模型重应用配置并做 direct 探针 |
 | profile list/show/set | 查看或原子切换 Profile |
 | models list/refresh | 只读查询或显式刷新模型目录 |
