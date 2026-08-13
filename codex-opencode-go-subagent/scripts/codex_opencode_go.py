@@ -1252,7 +1252,7 @@ def _parse_state_payload(payload):
     if fields:
         raise ManagerError("conflict", "托管状态文件字段无效。", {"fields": fields})
     try:
-        registry = models.registry_from_snapshot(payload.get("model_registry"))
+        registry = models.registry_from_managed_snapshot(payload.get("model_registry"))
     except models.ModelError as exc:
         raise ManagerError("conflict", "托管状态文件无效。", {"fields": ["model_registry"]}) from exc
     return {

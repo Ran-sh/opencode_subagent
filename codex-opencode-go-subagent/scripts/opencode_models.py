@@ -126,6 +126,7 @@ _CHAT_COMPATIBLE_PACKAGE = "@ai-sdk/openai-compatible"
 _MODEL_SPEC_FIELDS = frozenset(field.name for field in fields(ModelSpec))
 _SNAPSHOT_MSG = "invalid model snapshot"
 _REFRESH_MSG = "invalid refresh payload"
+_MANAGED_LEGACY_ADDITIONS = frozenset({"minimax-m2.5"})
 
 
 def registry_snapshot(registry=None):
@@ -165,6 +166,37 @@ def registry_from_snapshot(payload):
     if seen != set(MODELS):
         raise ModelError("snapshot_invalid", 400, _SNAPSHOT_MSG)
     return dict(sorted(result.items()))
+
+
+def registry_from_managed_snapshot(payload):
+    if (isinstance(payload, dict)
+            and payload.get("schema_version") == SNAPSHOT_SCHEMA_VERSION
+            and isinstance(payload.get("models"), list)):
+        records = payload["models"]
+        ids = []
+        for record in records:
+            if (not isinstance(record, dict)
+                    or not isinstance(record.get("id"), str)
+                    or not record.get("id")):
+                return registry_from_snapshot(payload)
+            ids.append(record["id"])
+        legacy_ids = set(MODELS) - _MANAGED_LEGACY_ADDITIONS
+        if (len(records) == len(legacy_ids)
+                and len(set(ids)) == len(ids)
+                and set(ids) == legacy_ids):
+            upgraded = {
+                "schema_version": payload["schema_version"],
+                "models": [dict(record) for record in records],
+            }
+            for record in upgraded["models"]:
+                if isinstance(record.get("efforts"), list):
+                    record["efforts"] = list(record["efforts"])
+            for model_id in sorted(_MANAGED_LEGACY_ADDITIONS):
+                new_record = asdict(MODELS[model_id])
+                new_record["efforts"] = list(new_record["efforts"])
+                upgraded["models"].append(new_record)
+            return registry_from_snapshot(upgraded)
+    return registry_from_snapshot(payload)
 
 
 def _validate_record(record):
