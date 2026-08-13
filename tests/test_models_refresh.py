@@ -172,6 +172,72 @@ class ModelsRefreshRedTests(unittest.TestCase):
             models.MODELS[models.DEFAULT_MODEL],
         )
 
+    # R1: exact legacy 18-model snapshot upgrades in memory; every other set stays strict.
+    def test_managed_snapshot_upgrades_only_exact_previous_catalog(self):
+        models = self.models
+        managed = getattr(models, "registry_from_managed_snapshot", None)
+        self.assertTrue(callable(managed), "RED: registry_from_managed_snapshot is missing")
+        current_payload = self._snapshot()
+        current_before = copy.deepcopy(current_payload)
+        strict = self._restore(current_payload)
+        self.assertEqual(managed(current_payload), strict)
+        self.assertEqual(current_payload, current_before)
+        legacy = copy.deepcopy(current_payload)
+        legacy["models"] = [
+            record for record in legacy["models"] if record["id"] != "minimax-m2.5"]
+        flash = next(
+            record for record in legacy["models"]
+            if record["id"] == "deepseek-v4-flash")
+        flash.update(
+            status="unavailable", context_window=777777,
+            max_output=222222, source_revision="2026-08-12")
+        before = copy.deepcopy(legacy)
+        upgraded = managed(legacy)
+        self.assertEqual(len(upgraded), 19)
+        self.assertEqual(set(upgraded), set(models.MODELS))
+        self.assertEqual(upgraded["minimax-m2.5"], models.MODELS["minimax-m2.5"])
+        legacy_by_id = {record["id"]: record for record in legacy["models"]}
+        for model_id, record in legacy_by_id.items():
+            expected = dict(record)
+            expected["efforts"] = tuple(record["efforts"])
+            self.assertEqual(dataclasses.asdict(upgraded[model_id]), expected)
+        self.assertEqual(legacy, before)
+        missing_hy3 = copy.deepcopy(current_payload)
+        missing_hy3["models"] = [
+            record for record in missing_hy3["models"] if record["id"] != "hy3"]
+        unknown_extra = copy.deepcopy(legacy)
+        extra_record = copy.deepcopy(unknown_extra["models"][0])
+        extra_record["id"] = "unknown-extra"
+        extra_record["name"] = "Unknown Extra"
+        unknown_extra["models"].append(extra_record)
+        duplicate = copy.deepcopy(legacy)
+        duplicate["models"].append(copy.deepcopy(duplicate["models"][0]))
+        transport_drift = copy.deepcopy(legacy)
+        drift_flash = next(
+            record for record in transport_drift["models"]
+            if record["id"] == "deepseek-v4-flash")
+        drift_flash["transport"] = "bogus"
+        schema_wrong = copy.deepcopy(legacy)
+        schema_wrong["schema_version"] = 2
+        models_wrong = copy.deepcopy(legacy)
+        models_wrong["models"] = {}
+        cases = [
+            ("missing hy3 with m2.5 retained", missing_hy3),
+            ("unknown extra id", unknown_extra),
+            ("duplicate record", duplicate),
+            ("transport drift", transport_drift),
+            ("schema_version=2", schema_wrong),
+            ("models not a list", models_wrong),
+        ]
+        for label, payload in cases:
+            with self.subTest(label=label):
+                payload_before = copy.deepcopy(payload)
+                with self.assertRaises(models.ModelError) as ctx:
+                    managed(payload)
+                self.assertEqual(ctx.exception.code, "snapshot_invalid")
+                self.assertEqual(ctx.exception.status, 400)
+                self.assertEqual(payload, payload_before)
+
     # R1: every invalid snapshot dimension raises snapshot_invalid (400).
     def test_snapshot_rejects_schema_ids_transport_status_effort_limits(self):
         models = self.models

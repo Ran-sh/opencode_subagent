@@ -260,3 +260,82 @@ class ManagerRegistryContractTests(unittest.TestCase):
             serialized = json.dumps(status_payload, ensure_ascii=False)
             self.assertNotIn(token, serialized)
             self.assertNotIn(SECRET_MARKER, serialized)
+
+    # R1: exact legacy 18-model managed snapshot upgrades in memory with zero writes.
+    def test_exact_legacy_catalog_is_upgraded_in_memory_without_managed_writes(self):
+        manager = fixtures._load_manager()
+        models = fixtures._load_opencode_models()
+        with tempfile.TemporaryDirectory() as directory:
+            paths = _configure(manager, Path(directory))
+            state = json.loads(paths.state.read_text(encoding="utf-8"))
+            snapshot = state["model_registry"]
+            self.assertEqual(len(snapshot["models"]), 19)
+            legacy_records = [
+                record for record in snapshot["models"]
+                if record["id"] != "minimax-m2.5"]
+            self.assertEqual(len(legacy_records), 18)
+            state["model_registry"] = dict(snapshot, models=legacy_records)
+            state_bytes = (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode()
+            paths.state.write_bytes(state_bytes)
+            manifest = manager.read_manifest(paths)
+            manifest["state_sha256"] = manager.sha256_bytes(state_bytes)
+            manager.write_manifest(paths, manifest)
+            before = fixtures._snapshot(paths.home)
+            backups_before = fixtures._snapshot(paths.backups) if paths.backups.is_dir() else {}
+            with mock.patch.object(manager, "credential_has_key", return_value=True):
+                registry = manager.read_model_registry(paths)
+                status_payload = manager.status(paths)
+                gateway = manager.read_gateway_state(paths)
+            self.assertEqual(len(registry), 19)
+            self.assertEqual(set(registry), set(models.MODELS))
+            self.assertEqual(registry["minimax-m2.5"], models.MODELS["minimax-m2.5"])
+            self.assertEqual(status_payload.get("status"), "configured")
+            self.assertEqual(
+                status_payload.get("active_profile"),
+                {"model": "deepseek-v4-flash", "effort": "max"})
+            checks = status_payload.get("checks") or {}
+            self.assertIs(checks.get("model_registry_valid"), True)
+            self.assertEqual(gateway["version"], state["version"])
+            self.assertEqual(gateway["port"], state["port"])
+            after = fixtures._snapshot(paths.home)
+            backups_after = fixtures._snapshot(paths.backups) if paths.backups.is_dir() else {}
+            self.assertEqual(after, before)
+            self.assertEqual(backups_after, backups_before)
+            serialized = json.dumps(
+                [
+                    registry,
+                    status_payload,
+                    {"version": gateway["version"], "port": gateway["port"]},
+                ],
+                ensure_ascii=False)
+            self.assertNotIn(SECRET_MARKER, serialized)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = _configure(manager, Path(directory))
+            state = json.loads(paths.state.read_text(encoding="utf-8"))
+            snapshot = state["model_registry"]
+            missing_hy3 = [
+                record for record in snapshot["models"] if record["id"] != "hy3"]
+            self.assertEqual(len(missing_hy3), 18)
+            self.assertIn(
+                "minimax-m2.5", {record["id"] for record in missing_hy3})
+            state["model_registry"] = dict(snapshot, models=missing_hy3)
+            state_bytes = (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode()
+            paths.state.write_bytes(state_bytes)
+            manifest = manager.read_manifest(paths)
+            manifest["state_sha256"] = manager.sha256_bytes(state_bytes)
+            manager.write_manifest(paths, manifest)
+            before = fixtures._snapshot(paths.home)
+            backups_before = fixtures._snapshot(paths.backups) if paths.backups.is_dir() else {}
+            with self.assertRaises(manager.ManagerError) as raised:
+                manager.read_model_registry(paths)
+            self.assertEqual(raised.exception.code, "conflict")
+            self.assertIn(
+                "model_registry", raised.exception.details.get("fields", []))
+            status_payload = manager.status(paths)
+            self.assertEqual(status_payload.get("status"), "conflict")
+            checks = status_payload.get("checks") or {}
+            self.assertIs(checks.get("model_registry_valid"), False)
+            after = fixtures._snapshot(paths.home)
+            backups_after = fixtures._snapshot(paths.backups) if paths.backups.is_dir() else {}
+            self.assertEqual(after, before)
+            self.assertEqual(backups_after, backups_before)
