@@ -512,6 +512,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
                 transport=upstream.transport,
                 custom_tool_names=upstream.custom_tool_names,
                 reasoning_store=server._reasoning_store,
+                namespace_tool_names=upstream.namespace_tool_names,
             )
             for event in translated:
                 raw = _GATEWAY.encode_sse(event)

@@ -8,6 +8,7 @@ credentials, or persists state to disk.
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import secrets
@@ -76,6 +77,7 @@ class UpstreamRequest:
     headers: dict
     body: dict
     custom_tool_names: tuple
+    namespace_tool_names: tuple = ()
 
     def __repr__(self):
         return (
@@ -107,6 +109,35 @@ def _load_models():
 
 def _sse(event, payload):
     return SSEEvent(event, json.dumps(payload))
+
+
+def _namespace_proxy_name(namespace: str, child: str) -> str:
+    """ADR-1 deterministic proxy name for one namespace child tool."""
+    allowed = frozenset(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+    )
+
+    def slug(value: str, limit: int) -> str:
+        return "".join(ch if ch in allowed else "_" for ch in value)[:limit]
+
+    ns_slug = slug(namespace, 16)
+    child_slug = slug(child, 24)
+    digest = hashlib.sha256((namespace + "\0" + child).encode("utf-8")).hexdigest()[:16]
+    return f"ocg_{ns_slug}_{child_slug}_{digest}"
+
+
+def _namespace_restore_item(item, namespace_tool_names):
+    """Restore namespace + child name on one function_call item in place."""
+    if not isinstance(item, dict) or item.get("type") != "function_call":
+        return item
+    if not isinstance(item.get("name"), str):
+        return item
+    for proxy, namespace, child_name in namespace_tool_names:
+        if item["name"] == proxy:
+            item["name"] = child_name
+            item["namespace"] = namespace
+            break
+    return item
 
 
 def _new_id_factory():
@@ -159,6 +190,15 @@ def _validate_input_item(item):
             raise GatewayError(
                 "invalid_input", 400, "function_call requires string arguments"
             )
+        if itype == "function_call":
+            namespace = item.get("namespace")
+            if namespace is not None and (
+                not isinstance(namespace, str) or not namespace
+            ):
+                raise GatewayError(
+                    "invalid_input", 400,
+                    "function_call namespace must be a non-empty string",
+                )
         if itype == "custom_tool_call" and not isinstance(item.get("input"), str):
             raise GatewayError(
                 "invalid_request", 400, "custom_tool_call requires string input"
@@ -197,6 +237,33 @@ def _validate_request(request):
         if ttype == "custom":
             custom_names.append(tool["name"])
             continue
+        if ttype == "namespace":
+            if not isinstance(tool.get("name"), str) or not tool["name"]:
+                raise GatewayError(
+                    "invalid_tool", 400, "namespace requires a non-empty name"
+                )
+            children = tool.get("tools")
+            if not isinstance(children, list) or not children:
+                raise GatewayError(
+                    "invalid_tool", 400,
+                    "namespace requires a non-empty tools list",
+                )
+            for child in children:
+                if (
+                    not isinstance(child, dict)
+                    or not isinstance(child.get("name"), str)
+                    or not child["name"]
+                ):
+                    raise GatewayError(
+                        "invalid_tool", 400,
+                        "namespace child must be an object with a non-empty name",
+                    )
+                if child.get("type") != "function":
+                    raise GatewayError(
+                        "unsupported_tool", 400,
+                        f"unsupported namespace child type: {child.get('type')!r}",
+                    )
+            continue
         raise GatewayError("unsupported_tool", 400, f"unsupported tool type: {ttype!r}")
     items = request.get("input") or []
     if not isinstance(items, list):
@@ -230,6 +297,64 @@ def _normalize_developer_messages(request):
     if parts:
         normalized["instructions"] = "\n\n".join(parts)
     return normalized
+
+
+def _normalize_namespace_tools(request):
+    """Flatten namespace definitions and remap namespaced history on a deep copy."""
+    normalized = copy.deepcopy(request)
+    source_tools = normalized.get("tools") or []
+    occupied = set()
+    for tool in source_tools:
+        if isinstance(tool, dict) and tool.get("type") in ("function", "custom"):
+            occupied.add(tool["name"])
+    flattened = []
+    mappings = []
+    seen_identities = set()
+    for tool in source_tools:
+        if not isinstance(tool, dict):
+            flattened.append(tool)
+            continue
+        if tool.get("type") != "namespace":
+            flattened.append(copy.deepcopy(tool))
+            continue
+        for child in tool.get("tools") or []:
+            identity = (tool["name"], child["name"])
+            if identity in seen_identities:
+                raise GatewayError(
+                    "tool_name_collision", 400, "duplicate namespace tool identity"
+                )
+            seen_identities.add(identity)
+            proxy = _namespace_proxy_name(tool["name"], child["name"])
+            if proxy in occupied:
+                raise GatewayError(
+                    "tool_name_collision", 400,
+                    "namespace proxy collides with an existing tool name",
+                )
+            occupied.add(proxy)
+            flat_child = copy.deepcopy(child)
+            flat_child["name"] = proxy
+            flattened.append(flat_child)
+            mappings.append((proxy, tool["name"], child["name"]))
+    normalized["tools"] = flattened
+    identity_to_proxy = {
+        (namespace, child_name): proxy
+        for proxy, namespace, child_name in mappings
+    }
+    for item in normalized.get("input") or []:
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        namespace = item.get("namespace")
+        if namespace is None:
+            continue
+        proxy = identity_to_proxy.get((namespace, item.get("name")))
+        if proxy is None:
+            raise GatewayError(
+                "unknown_namespace_tool", 400,
+                "function_call references an undeclared namespace tool",
+            )
+        item.pop("namespace", None)
+        item["name"] = proxy
+    return normalized, tuple(mappings)
 
 
 def _resolve_reasoning(reasoning_store, handle, transport):
@@ -630,6 +755,7 @@ def prepare_upstream_request(
         ) from exc
     custom_tool_names = _validate_request(request)
     request = _normalize_developer_messages(request)
+    request, namespace_tool_names = _normalize_namespace_tools(request)
     transport = spec.transport
     if transport == "chat_completions":
         body = _build_chat_body(
@@ -657,6 +783,7 @@ def prepare_upstream_request(
         headers=headers,
         body=body,
         custom_tool_names=custom_tool_names,
+        namespace_tool_names=namespace_tool_names,
     )
 
 
@@ -703,7 +830,7 @@ def _extract_custom_input(arguments):
     return parsed["input"]
 
 
-def _translate_chat_stream(chunks, custom_tool_names, reasoning_store):
+def _translate_chat_stream(chunks, custom_tool_names, reasoning_store, namespace_tool_names=()):
     make_id = _new_id_factory()
     rid = make_id("resp")
     started = False
@@ -769,18 +896,17 @@ def _translate_chat_stream(chunks, custom_tool_names, reasoning_store):
         if not entry["added"]:
             entry["item_id"] = make_id("fc")
             entry["added"] = True
+            item = {
+                "type": "function_call",
+                "id": entry["item_id"],
+                "call_id": entry["id"],
+                "name": entry["name"],
+                "arguments": "",
+            }
+            _namespace_restore_item(item, namespace_tool_names)
             yield _sse(
                 "response.output_item.added",
-                {
-                    "type": "response.output_item.added",
-                    "item": {
-                        "type": "function_call",
-                        "id": entry["item_id"],
-                        "call_id": entry["id"],
-                        "name": entry["name"],
-                        "arguments": "",
-                    },
-                },
+                {"type": "response.output_item.added", "item": item},
             )
         while entry["emitted_count"] < len(entry["arguments_parts"]):
             fragment = entry["arguments_parts"][entry["emitted_count"]]
@@ -990,18 +1116,17 @@ def _translate_chat_stream(chunks, custom_tool_names, reasoning_store):
                     "arguments": arguments,
                 },
             )
+            done_item = {
+                "type": "function_call",
+                "id": entry["item_id"],
+                "call_id": entry["id"],
+                "name": entry["name"],
+                "arguments": arguments,
+            }
+            _namespace_restore_item(done_item, namespace_tool_names)
             yield _sse(
                 "response.output_item.done",
-                {
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "function_call",
-                        "id": entry["item_id"],
-                        "call_id": entry["id"],
-                        "name": entry["name"],
-                        "arguments": arguments,
-                    },
-                },
+                {"type": "response.output_item.done", "item": done_item},
             )
     if usage is None:
         usage = _empty_usage()
@@ -1014,7 +1139,7 @@ def _translate_chat_stream(chunks, custom_tool_names, reasoning_store):
     )
 
 
-def _translate_messages_stream(chunks, custom_tool_names, reasoning_store):
+def _translate_messages_stream(chunks, custom_tool_names, reasoning_store, namespace_tool_names=()):
     make_id = _new_id_factory()
     rid = make_id("resp")
     started = False
@@ -1119,18 +1244,17 @@ def _translate_messages_stream(chunks, custom_tool_names, reasoning_store):
                 ):
                     state["item_id"] = make_id("fc")
                     state["added"] = True
+                    item = {
+                        "type": "function_call",
+                        "id": state["item_id"],
+                        "call_id": tool_use["id"],
+                        "name": tool_use["name"],
+                        "arguments": "",
+                    }
+                    _namespace_restore_item(item, namespace_tool_names)
                     yield _sse(
                         "response.output_item.added",
-                        {
-                            "type": "response.output_item.added",
-                            "item": {
-                                "type": "function_call",
-                                "id": state["item_id"],
-                                "call_id": tool_use["id"],
-                                "name": tool_use["name"],
-                                "arguments": "",
-                            },
-                        },
+                        {"type": "response.output_item.added", "item": item},
                     )
             else:
                 raise GatewayError(
@@ -1330,18 +1454,17 @@ def _translate_messages_stream(chunks, custom_tool_names, reasoning_store):
                             "arguments": arguments,
                         },
                     )
+                    done_item = {
+                        "type": "function_call",
+                        "id": state["item_id"],
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": arguments,
+                    }
+                    _namespace_restore_item(done_item, namespace_tool_names)
                     yield _sse(
                         "response.output_item.done",
-                        {
-                            "type": "response.output_item.done",
-                            "item": {
-                                "type": "function_call",
-                                "id": state["item_id"],
-                                "call_id": call_id,
-                                "name": name,
-                                "arguments": arguments,
-                            },
-                        },
+                        {"type": "response.output_item.done", "item": done_item},
                     )
             continue
         if ctype == "message_delta":
@@ -1375,7 +1498,7 @@ def _translate_messages_stream(chunks, custom_tool_names, reasoning_store):
     )
 
 
-def _translate_responses_stream(chunks, reasoning_store):
+def _translate_responses_stream(chunks, reasoning_store, namespace_tool_names=()):
     handles = {}
     completed_seen = False
     for chunk in chunks:
@@ -1403,8 +1526,13 @@ def _translate_responses_stream(chunks, reasoning_store):
                     item["encrypted_content"] = handles[item_id]
                 elif item_id in handles:
                     item["encrypted_content"] = handles[item_id]
+            _namespace_restore_item(item, namespace_tool_names)
         if ctype == "response.completed":
             completed_seen = True
+            response = payload.get("response")
+            if isinstance(response, dict) and isinstance(response.get("output"), list):
+                for entry in response["output"]:
+                    _namespace_restore_item(entry, namespace_tool_names)
         if ctype == "response.failed":
             yield _sse(ctype, payload)
             return
@@ -1417,17 +1545,19 @@ def _translate_responses_stream(chunks, reasoning_store):
 
 
 def translate_upstream_stream(
-    chunks, transport, custom_tool_names=(), reasoning_store=None
+    chunks, transport, custom_tool_names=(), reasoning_store=None, namespace_tool_names=()
 ):
     if transport == "responses":
-        yield from _translate_responses_stream(chunks, reasoning_store)
+        yield from _translate_responses_stream(
+            chunks, reasoning_store, namespace_tool_names
+        )
     elif transport == "chat_completions":
         yield from _translate_chat_stream(
-            chunks, custom_tool_names, reasoning_store
+            chunks, custom_tool_names, reasoning_store, namespace_tool_names
         )
     elif transport == "anthropic_messages":
         yield from _translate_messages_stream(
-            chunks, custom_tool_names, reasoning_store
+            chunks, custom_tool_names, reasoning_store, namespace_tool_names
         )
     else:
         raise GatewayError(
