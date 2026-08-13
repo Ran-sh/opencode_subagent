@@ -1,0 +1,6 @@
+interface:
+  display_name: "OpenCode Go Subagent"
+  short_description: "Configure and verify OpenCode Go native subagents"
+  default_prompt: "Use $codex-opencode-go-subagent to configure, switch, diagnose, or remove the OpenCode Go native subagent."
+policy:
+  allow_implicit_invocation: true

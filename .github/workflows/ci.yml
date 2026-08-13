@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Py compile
+        run: python -c "import pathlib,py_compile,tempfile; d=tempfile.TemporaryDirectory(); o=pathlib.Path(d.name); [py_compile.compile(str(p),cfile=str(o/(str(i)+'.pyc')),doraise=True) for i,p in enumerate(sorted(pathlib.Path('.').rglob('*.py')))]"
+      - name: Unit tests
+        run: python -B -m unittest discover -s tests -v
+      - name: Quick validate
+        run: python scripts/quick_validate.py codex-opencode-go-subagent --repo-root .
