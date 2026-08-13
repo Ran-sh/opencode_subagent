@@ -292,7 +292,7 @@ class RequestTranslationContractTests(unittest.TestCase):
         # structured failure must not leak the key
         with self.assertRaises(gateway.GatewayError) as cm:
             gateway.prepare_upstream_request(
-                _codex_request(tools=[{"type": "web_search"}]),
+                _codex_request(tools=[{"type": "web_search", "name": "web_search"}]),
                 model="deepseek-v4-flash",
                 effort="high",
                 api_key=TEST_API_KEY,
@@ -1773,6 +1773,131 @@ class RequestTranslationContractTests(unittest.TestCase):
             )
             self.assertEqual(plain.namespace_tool_names, ())
 
+    def test_unnamed_web_search_declaration_is_filtered(self):
+        gateway = _load_production_module("opencode_gateway", _GATEWAY_PATH)
+        tools = [
+            _function_tool("read_file"),
+            {
+                "type": "web_search",
+                "external_web_access": True,
+                "filters": {"allowed_domains": ["example.com"]},
+            },
+            _namespace_tool(),
+            _custom_tool("apply_patch"),
+        ]
+        cases = (
+            ("deepseek-v4-flash", "high", "chat_completions"),
+            ("gpt-5.6-luna", "xhigh", "responses"),
+            ("qwen3.8-max", "high", "anthropic_messages"),
+        )
+        for model_id, effort, transport in cases:
+            with self.subTest(model=model_id, transport=transport):
+                request = _codex_request(model=model_id, tools=copy.deepcopy(tools))
+                before = copy.deepcopy(request)
+                upstream = gateway.prepare_upstream_request(
+                    request, model=model_id, effort=effort, api_key=TEST_API_KEY
+                )
+                self.assertEqual(upstream.transport, transport)
+                self.assertEqual(request, before)
+                self.assertEqual(len(upstream.namespace_tool_names), 1)
+                proxy = upstream.namespace_tool_names[0][0]
+                self.assertEqual(
+                    upstream.namespace_tool_names[0][1:], ("mcp__node_repl", "js")
+                )
+                body = upstream.body
+                body_json = json.dumps(body)
+                self.assertNotIn("web_search", body_json)
+                self.assertNotIn("external_web_access", body_json)
+                self.assertNotIn("filters", body_json)
+                self.assertNotIn("example.com", body_json)
+                if transport == "chat_completions":
+                    names = [t["function"]["name"] for t in body["tools"]]
+                    read_def = next(
+                        t["function"]
+                        for t in body["tools"]
+                        if t["function"]["name"] == "read_file"
+                    )
+                    apply_def = next(
+                        t["function"]
+                        for t in body["tools"]
+                        if t["function"]["name"] == "apply_patch"
+                    )
+                    self.assertEqual(
+                        read_def["parameters"],
+                        _function_tool("read_file")["parameters"],
+                    )
+                    self.assertEqual(
+                        apply_def["parameters"],
+                        {
+                            "type": "object",
+                            "properties": {"input": {"type": "string"}},
+                            "required": ["input"],
+                        },
+                    )
+                elif transport == "responses":
+                    names = [t["name"] for t in body["tools"]]
+                    read_def = next(
+                        t for t in body["tools"] if t["name"] == "read_file"
+                    )
+                    apply_def = next(
+                        t for t in body["tools"] if t["name"] == "apply_patch"
+                    )
+                    self.assertEqual(read_def["type"], "function")
+                    self.assertEqual(
+                        read_def["parameters"],
+                        _function_tool("read_file")["parameters"],
+                    )
+                    self.assertEqual(apply_def, _custom_tool("apply_patch"))
+                else:
+                    names = [t["name"] for t in body["tools"]]
+                    read_def = next(
+                        t for t in body["tools"] if t["name"] == "read_file"
+                    )
+                    apply_def = next(
+                        t for t in body["tools"] if t["name"] == "apply_patch"
+                    )
+                    self.assertEqual(
+                        read_def["input_schema"],
+                        _function_tool("read_file")["parameters"],
+                    )
+                    self.assertEqual(
+                        apply_def["input_schema"],
+                        {
+                            "type": "object",
+                            "properties": {"input": {"type": "string"}},
+                            "required": ["input"],
+                        },
+                    )
+                self.assertEqual(names, ["read_file", proxy, "apply_patch"])
+        # boundary: a request declaring only an unnamed web_search tool succeeds
+        for model_id, effort in (
+            ("deepseek-v4-flash", "high"),
+            ("gpt-5.6-luna", "xhigh"),
+            ("qwen3.8-max", "high"),
+        ):
+            with self.subTest(model=model_id, case="only_web_search"):
+                request = _codex_request(
+                    model=model_id,
+                    tools=[{"type": "web_search", "external_web_access": False}],
+                )
+                before = copy.deepcopy(request)
+                upstream = gateway.prepare_upstream_request(
+                    request, model=model_id, effort=effort, api_key=TEST_API_KEY
+                )
+                self.assertEqual(request, before)
+                self.assertEqual(upstream.body["tools"], [])
+        # named web_search remains an unsupported tool and never leaks the key
+        with self.assertRaises(gateway.GatewayError) as cm:
+            gateway.prepare_upstream_request(
+                _codex_request(tools=[{"type": "web_search", "name": "web_search"}]),
+                model="deepseek-v4-flash",
+                effort="high",
+                api_key=TEST_API_KEY,
+            )
+        self.assertEqual(cm.exception.code, "unsupported_tool")
+        self.assertEqual(cm.exception.status, 400)
+        self.assertNotIn(TEST_API_KEY, str(cm.exception))
+
 
 class StreamTranslationContractTests(unittest.TestCase):
     """R4: upstream stream conversion to Codex-consumable SSE events."""
@@ -3077,7 +3202,6 @@ class UnsupportedContractTests(unittest.TestCase):
             "input_audio": _codex_request(
                 input=[{"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}}]
             ),
-            "web_search": _codex_request(tools=[{"type": "web_search"}]),
             "image_generation": _codex_request(tools=[{"type": "image_generation"}]),
             "computer_use": _codex_request(tools=[{"type": "computer_use"}]),
             "local_shell": _codex_request(tools=[{"type": "local_shell"}]),
@@ -3120,6 +3244,50 @@ class UnsupportedContractTests(unittest.TestCase):
         self.assertIn("shell_command", body_tools)
         self.assertIn("exec_command", body_tools)
         self.assertIn("apply_patch", body_tools)
+
+    def test_rejects_web_search_call_history(self):
+        gateway = _load_production_module("opencode_gateway", _GATEWAY_PATH)
+        cases = {
+            "completed": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hi"}],
+                },
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "secret-query-marker"},
+                },
+            ],
+            "in_progress": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hi"}],
+                },
+                {
+                    "type": "web_search_call",
+                    "id": "ws_2",
+                    "status": "in_progress",
+                },
+            ],
+        }
+        for case_name, input_items in cases.items():
+            with self.subTest(case=case_name):
+                with self.assertRaises(gateway.GatewayError) as cm:
+                    gateway.prepare_upstream_request(
+                        _codex_request(input=input_items),
+                        model="deepseek-v4-flash",
+                        effort="high",
+                        api_key=TEST_API_KEY,
+                    )
+                self.assertEqual(cm.exception.code, "unsupported_input")
+                self.assertEqual(cm.exception.status, 400)
+                self.assertNotIn(TEST_API_KEY, str(cm.exception))
+                self.assertNotIn("secret-query-marker", str(cm.exception))
+                self.assertNotIn("query", str(cm.exception))
 
 
 if __name__ == "__main__":
