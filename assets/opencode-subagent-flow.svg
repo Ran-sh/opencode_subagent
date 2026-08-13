@@ -1,67 +1,108 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
-  <title id="title">Codex to OpenCode Go architecture</title>
-  <desc id="desc">Codex connects through the OpenCode Subagent to OpenCode Go.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Codex to OpenCode Go</title>
+  <desc id="desc">Codex connects to OpenCode Go through one secure native OpenCode Subagent.</desc>
+
   <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#07111f"/>
-      <stop offset="0.52" stop-color="#111936"/>
-      <stop offset="1" stop-color="#071a19"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#060b16"/>
+      <stop offset="0.5" stop-color="#0d1225"/>
+      <stop offset="1" stop-color="#071713"/>
     </linearGradient>
-    <linearGradient id="codex" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2f81f7"/>
-      <stop offset="1" stop-color="#0969da"/>
+    <radialGradient id="glow" cx="50%" cy="48%" r="46%">
+      <stop offset="0" stop-color="#8250df" stop-opacity="0.24"/>
+      <stop offset="0.48" stop-color="#2f81f7" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#060b16" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lineLeft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2f81f7" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#a371f7"/>
     </linearGradient>
-    <linearGradient id="subagent" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="lineRight" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#a371f7"/>
-      <stop offset="1" stop-color="#6e40c9"/>
+      <stop offset="1" stop-color="#3fb950" stop-opacity="0.65"/>
     </linearGradient>
-    <linearGradient id="opencode" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3fb950"/>
-      <stop offset="1" stop-color="#238636"/>
+    <linearGradient id="centerBorder" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d2a8ff"/>
+      <stop offset="0.48" stop-color="#8250df"/>
+      <stop offset="1" stop-color="#2f81f7"/>
     </linearGradient>
-    <filter id="shadow" x="-20%" y="-30%" width="140%" height="160%">
-      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.025"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-35%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000" flood-opacity="0.42"/>
     </filter>
-    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
-      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#8b949e"/>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrowPurple" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#a371f7"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#3fb950"/>
     </marker>
   </defs>
 
-  <rect width="1200" height="320" rx="28" fill="url(#background)"/>
-  <circle cx="90" cy="42" r="110" fill="#2f81f7" opacity="0.08"/>
-  <circle cx="1090" cy="288" r="150" fill="#3fb950" opacity="0.07"/>
-  <path d="M0 270 C250 220 390 320 620 265 S980 220 1200 265" fill="none" stroke="#fff" stroke-opacity="0.04" stroke-width="2"/>
+  <rect width="1200" height="360" rx="28" fill="url(#bg)"/>
+  <rect width="1200" height="360" rx="28" fill="url(#grid)"/>
+  <rect width="1200" height="360" rx="28" fill="url(#glow)"/>
+
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" text-anchor="middle">
+    <text x="600" y="43" fill="#8b949e" font-size="12" font-weight="700" letter-spacing="3.4">NATIVE SUBAGENT BRIDGE</text>
+    <text x="600" y="76" fill="#f0f6fc" font-size="24" font-weight="650" letter-spacing="0.2">One role. Three transports. Nineteen models.</text>
+  </g>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M330 190H439" stroke="url(#lineLeft)" stroke-width="3" marker-end="url(#arrowPurple)"/>
+    <path d="M761 190H870" stroke="url(#lineRight)" stroke-width="3" marker-end="url(#arrowGreen)"/>
+    <circle cx="352" cy="190" r="3" fill="#58a6ff" stroke="none"/>
+    <circle cx="783" cy="190" r="3" fill="#a371f7" stroke="none"/>
+  </g>
+
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" text-anchor="middle" font-size="12" font-weight="600">
+    <rect x="346" y="159" width="78" height="23" rx="11.5" fill="#161f35" stroke="#30363d"/>
+    <text x="385" y="175" fill="#79c0ff">Responses</text>
+    <rect x="776" y="151" width="87" height="23" rx="11.5" fill="#141f24" stroke="#30363d"/>
+    <text x="819.5" y="167" fill="#7ee787">3 transports</text>
+  </g>
 
   <g filter="url(#shadow)">
-    <rect x="70" y="88" width="270" height="144" rx="24" fill="url(#codex)"/>
-    <rect x="465" y="68" width="270" height="184" rx="28" fill="url(#subagent)"/>
-    <rect x="860" y="88" width="270" height="144" rx="24" fill="url(#opencode)"/>
+    <rect x="70" y="124" width="260" height="132" rx="22" fill="#0d1729" stroke="#2f81f7" stroke-opacity="0.7"/>
+    <rect x="72" y="126" width="4" height="128" rx="2" fill="#2f81f7"/>
+
+    <rect x="440" y="104" width="320" height="172" rx="26" fill="#111326" stroke="url(#centerBorder)" stroke-width="2"/>
+    <rect x="452" y="116" width="296" height="148" rx="20" fill="none" stroke="#ffffff" stroke-opacity="0.055"/>
+
+    <rect x="870" y="124" width="260" height="132" rx="22" fill="#0c1918" stroke="#3fb950" stroke-opacity="0.72"/>
+    <rect x="1124" y="126" width="4" height="128" rx="2" fill="#3fb950"/>
   </g>
 
-  <g fill="none" stroke="#8b949e" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)">
-    <path d="M355 160 H445"/>
-    <path d="M750 160 H840"/>
-  </g>
-  <g fill="#8b949e">
-    <circle cx="370" cy="160" r="4"/>
-    <circle cx="765" cy="160" r="4"/>
-  </g>
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" text-anchor="middle">
+    <circle cx="200" cy="168" r="20" fill="#2f81f7" fill-opacity="0.14" stroke="#2f81f7"/>
+    <text x="200" y="174" fill="#79c0ff" font-size="16" font-weight="800">C</text>
+    <text x="200" y="211" fill="#f0f6fc" font-size="30" font-weight="700">Codex</text>
+    <text x="200" y="235" fill="#8b949e" font-size="13" letter-spacing="0.8">ORCHESTRATOR</text>
 
-  <g font-family="Inter,Segoe UI,Arial,sans-serif" text-anchor="middle" fill="#fff">
-    <text x="205" y="151" font-size="38" font-weight="700" letter-spacing="0.5">Codex</text>
-    <text x="205" y="184" font-size="15" opacity="0.82" letter-spacing="1.4">NATIVE ORCHESTRATION</text>
+    <circle cx="600" cy="151" r="22" fill="#8250df" fill-opacity="0.18" stroke="#a371f7" filter="url(#softGlow)"/>
+    <path d="M590 151h20M600 141v20" stroke="#d2a8ff" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="600" y="199" fill="#ffffff" font-size="30" font-weight="720">OpenCode Subagent</text>
+    <text x="600" y="226" fill="#b6a4e8" font-size="13" letter-spacing="0.9">LOCAL · SECURE · NATIVE</text>
+    <rect x="523" y="239" width="154" height="25" rx="12.5" fill="#8250df" fill-opacity="0.18" stroke="#8250df" stroke-opacity="0.55"/>
+    <text x="600" y="256" fill="#d2a8ff" font-size="12" font-weight="650">127.0.0.1 gateway</text>
 
-    <text x="600" y="139" font-size="32" font-weight="700">OpenCode</text>
-    <text x="600" y="177" font-size="32" font-weight="700">Subagent</text>
-    <rect x="518" y="198" width="164" height="28" rx="14" fill="#fff" opacity="0.14"/>
-    <text x="600" y="217" font-size="13" font-weight="600" letter-spacing="1.1">LOCAL GATEWAY</text>
-
-    <text x="995" y="151" font-size="34" font-weight="700">OpenCode Go</text>
-    <text x="995" y="184" font-size="15" opacity="0.82" letter-spacing="1.4">MULTI-MODEL API</text>
+    <circle cx="1000" cy="168" r="20" fill="#3fb950" fill-opacity="0.14" stroke="#3fb950"/>
+    <text x="1000" y="174" fill="#7ee787" font-size="14" font-weight="800">GO</text>
+    <text x="1000" y="211" fill="#f0f6fc" font-size="28" font-weight="700">OpenCode Go</text>
+    <text x="1000" y="235" fill="#8b949e" font-size="13" letter-spacing="0.8">MULTI-MODEL API</text>
   </g>
 
-  <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="600" text-anchor="middle" fill="#c9d1d9">
-    <text x="400" y="143">Responses</text>
-    <text x="795" y="143">3 transports</text>
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="600" text-anchor="middle">
+    <rect x="386" y="311" width="172" height="27" rx="13.5" fill="#0d1729" stroke="#30363d"/>
+    <circle cx="404" cy="324.5" r="4" fill="#58a6ff"/>
+    <text x="478" y="329" fill="#8b949e">System credential store</text>
+    <rect x="572" y="311" width="242" height="27" rx="13.5" fill="#111326" stroke="#30363d"/>
+    <circle cx="590" cy="324.5" r="4" fill="#a371f7"/>
+    <text x="693" y="329" fill="#8b949e">Chat · Responses · Messages</text>
   </g>
 </svg>
