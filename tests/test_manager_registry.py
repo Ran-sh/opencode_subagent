@@ -303,7 +303,10 @@ class ManagerRegistryContractTests(unittest.TestCase):
             self.assertEqual(backups_after, backups_before)
             serialized = json.dumps(
                 [
-                    registry,
+                    {
+                        model_id: dataclasses.asdict(spec)
+                        for model_id, spec in registry.items()
+                    },
                     status_payload,
                     {"version": gateway["version"], "port": gateway["port"]},
                 ],
