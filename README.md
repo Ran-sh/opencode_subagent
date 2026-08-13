@@ -2,6 +2,13 @@
   <img src="./assets/opencode-subagent-flow.svg" alt="Codex → OpenCode Subagent → OpenCode Go" width="100%">
 </p>
 
+<p align="center">
+  <strong>简体中文</strong> · <a href="./README.en.md">English</a>
+</p>
+
+<!-- README_SYNC: 2026-08-13.2 -->
+<!-- README.md and README.en.md are maintained as a synchronized pair. -->
+
 # opencode_subagent
 
 由 **Ran-sh** 维护。
@@ -186,7 +193,10 @@ Windows 使用 `py -3`。稳定命令包括：
 ```bash
 python -B -m unittest discover -s tests -v
 python -B scripts/quick_validate.py codex-opencode-go-subagent --repo-root .
+python -B scripts/check_readme_sync.py --repo-root .
 ```
+
+`README.md` 与 `README.en.md` 使用相同的 `README_SYNC` 修订号并保持固定章节、命令和模型契约。CI 还会对比变更基线；只修改其中一份 README 会直接失败。
 
 证据必须分层理解：
 

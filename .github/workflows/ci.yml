@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -30,3 +32,9 @@ jobs:
         run: python -B -m unittest discover -s tests -v
       - name: Quick validate
         run: python scripts/quick_validate.py codex-opencode-go-subagent --repo-root .
+      - name: README synchronization
+        if: github.event_name != 'workflow_dispatch'
+        run: python -B scripts/check_readme_sync.py --repo-root . --base "${{ github.event.pull_request.base.sha || github.event.before }}"
+      - name: README synchronization (manual run)
+        if: github.event_name == 'workflow_dispatch'
+        run: python -B scripts/check_readme_sync.py --repo-root .
