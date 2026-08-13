@@ -38,18 +38,53 @@ OpenCode 配置中的模型采用 `opencode-go/<model-id>` 格式；Codex 本地
 ## 架构
 
 ```mermaid
-flowchart LR
-    U["用户任务"] --> M["Codex 主 Agent"]
-    M -->|"spawn_agent: OpenCode"| A["原生 OpenCode 子 Agent"]
-    A -->|"Responses + 本地 Bearer"| G["127.0.0.1 本地网关"]
-    G --> T{"模型 transport"}
-    T --> C["chat_completions"]
-    T --> R["responses"]
-    T --> H["anthropic_messages"]
-    C --> O["OpenCode Go API"]
-    R --> O
-    H --> O
-    K["系统凭据库中的 API Key"] --> G
+flowchart TB
+    subgraph CODEX["Codex"]
+        direction LR
+        U["用户任务"] --> M["主 Agent"]
+        M -->|"spawn_agent<br/>agent_type = OpenCode"| A["OpenCode 子 Agent<br/>deepseek-v4-flash · max"]
+    end
+
+    subgraph LOCAL["本机安全边界 · 127.0.0.1"]
+        direction TB
+        G["兼容网关<br/>鉴权 · 流式 SSE · 工具往返"]
+        T{"Transport Router"}
+        C["Chat Completions"]
+        R["Responses"]
+        H["Anthropic Messages"]
+        G --> T
+        T --> C
+        T --> R
+        T --> H
+
+        K[("Credential Manager / Keychain<br/>OpenCode Go API Key")] -. "仅在内存读取" .-> G
+        S[("Reasoning State<br/>LRU · 2 小时 TTL")] <--> G
+    end
+
+    subgraph CLOUD["OpenCode Go"]
+        direction LR
+        API["Zen Go API"] --> MODELS["19 个模型<br/>多模型 · 多推理强度"]
+    end
+
+    A ==>|"Responses API<br/>本地 Bearer"| G
+    C --> API
+    R --> API
+    H --> API
+
+    classDef primary fill:#0969da,color:#fff,stroke:#0550ae,stroke-width:2px;
+    classDef gateway fill:#8250df,color:#fff,stroke:#6639ba,stroke-width:2px;
+    classDef adapter fill:#ddf4ff,color:#0550ae,stroke:#54aeff;
+    classDef secure fill:#dafbe1,color:#116329,stroke:#4ac26b;
+    classDef cloud fill:#fff8c5,color:#633c01,stroke:#d4a72c;
+    class A primary;
+    class G gateway;
+    class C,R,H adapter;
+    class K,S secure;
+    class API,MODELS cloud;
+
+    style CODEX fill:#f6f8fa,stroke:#afb8c1,stroke-width:1px
+    style LOCAL fill:#fbfaff,stroke:#8250df,stroke-width:2px
+    style CLOUD fill:#fffdf0,stroke:#d4a72c,stroke-width:1px
 ```
 
 本地网关负责协议转换、工具调用往返、SSE 流式输出和 reasoning 句柄管理。主任务继续使用用户原来的 Codex 模型与登录方式，本技能不会修改顶层 `model` 或 `model_provider`。
