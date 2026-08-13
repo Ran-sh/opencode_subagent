@@ -136,7 +136,7 @@ class ModelsRefreshRedTests(unittest.TestCase):
         payload = self._snapshot()
         self.assertEqual(payload["schema_version"], 1)
         records = payload["models"]
-        self.assertEqual(len(records), 18)
+        self.assertEqual(len(records), 19)
         self.assertEqual(
             [record["id"] for record in records], _canonical_ids(models))
         self.assertEqual(

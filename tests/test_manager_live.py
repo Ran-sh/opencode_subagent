@@ -26,7 +26,7 @@ from tests.test_manager import _all_files, _load_manager, _snapshot
 
 LOCAL_TOKEN_MARKER = "local-token-red-marker"
 UPSTREAM_SECRET_MARKER = "upstream-secret-red-marker"
-REVIEWED_MODELS = 18
+REVIEWED_MODELS = 19
 TEXT_MARKER = "OPENCODE_TEXT_OK"
 TOOL_MARKER = "OPENCODE_TOOL_OK"
 LIVE_TIMEOUT = 660

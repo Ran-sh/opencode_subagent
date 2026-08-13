@@ -31,7 +31,7 @@ TEST_API_KEY = "test-opencode-key"
 PRIVATE_REASONING = "private-thought"
 RESPONSES_OPAQUE = "opaque-enc"
 PATCH_RAW = "*** Begin Patch\n*** Update File: app.py\n@@\n-hello\n+world\n*** End Patch\n"
-REVISION = "2026-08-11"
+REVISION = "2026-08-13"
 
 _MODEL_SPEC_FIELDS = frozenset(
     {
@@ -62,6 +62,7 @@ _EXPECTED_SPECS = {
     "kimi-k3": ("Kimi K3", "chat_completions", ("max",), "max", 1048576, 131072),
     "mimo-v2.5": ("MiMo V2.5", "chat_completions", ("default",), "default", 1000000, 128000),
     "mimo-v2.5-pro": ("MiMo V2.5 Pro", "chat_completions", ("default",), "default", 1048576, 128000),
+    "minimax-m2.5": ("MiniMax M2.5", "anthropic_messages", ("default",), "default", 204800, 65536),
     "minimax-m2.7": ("MiniMax M2.7", "anthropic_messages", ("default",), "default", 204800, 131072),
     "minimax-m3": ("MiniMax M3", "anthropic_messages", ("none", "high"), "high", 1000000, 131072),
     "qwen3.6-plus": ("Qwen3.6 Plus", "anthropic_messages", ("none", "high", "max"), "max", 1000000, 65536),
@@ -199,13 +200,13 @@ def _events_json(events, event_name: str):
 
 
 class ModelCatalogContractTests(unittest.TestCase):
-    """R1: exact 18-model catalog, defaults, and profile validation errors."""
+    """R1: exact 19-model catalog, defaults, and profile validation errors."""
 
     def test_exact_catalog_and_defaults(self):
         models = _load_production_module("opencode_models", _MODELS_PATH)
         catalog = models.MODELS
         self.assertIsInstance(catalog, dict)
-        # exact catalog: 18 models and no 19th entry
+        # exact catalog: 19 models and no 20th entry
         self.assertEqual(set(catalog), set(_EXPECTED_SPECS))
         self.assertEqual(models.DEFAULT_MODEL, "deepseek-v4-flash")
         self.assertEqual(models.DEFAULT_EFFORT, "max")
@@ -253,6 +254,13 @@ class ModelCatalogContractTests(unittest.TestCase):
             models.get_model("grok-4.5", effort="default")
         err = cm.exception
         self.assertEqual(getattr(err, "code", None), "invalid_effort")
+        # minimax-m2.5 supports only "default"; "high" must be rejected
+        with self.assertRaises(models.ModelError) as cm:
+            models.validate_profile("minimax-m2.5", "high")
+        err = cm.exception
+        self.assertEqual(getattr(err, "code", None), "invalid_effort")
+        self.assertIsInstance(getattr(err, "status", None), int)
+        self.assertGreaterEqual(err.status, 400)
         spec = models.get_model("glm-5.1", effort="default")
         self.assertEqual(spec.id, "glm-5.1")
 
@@ -366,16 +374,20 @@ class RequestTranslationContractTests(unittest.TestCase):
                 self.assertEqual(body.get("thinking"), thinking)
                 self.assertEqual(body["max_tokens"], 32000)
                 self.assertNotIn(TEST_API_KEY, json.dumps(body))
-        # default effort omits thinking entirely but still sets max_tokens
-        default_upstream = gateway.prepare_upstream_request(
-            _codex_request(model="minimax-m2.7", reasoning={}),
-            model="minimax-m2.7",
-            effort="default",
-            api_key=TEST_API_KEY,
-        )
-        self.assertNotIn("thinking", default_upstream.body)
-        self.assertNotIn("reasoning_effort", default_upstream.body)
-        self.assertEqual(default_upstream.body["max_tokens"], 32000)
+        # default effort omits thinking/reasoning entirely but still sets max_tokens
+        for model_id in ("minimax-m2.5", "minimax-m2.7"):
+            with self.subTest(model=model_id):
+                default_upstream = gateway.prepare_upstream_request(
+                    _codex_request(model=model_id, reasoning={}),
+                    model=model_id,
+                    effort="default",
+                    api_key=TEST_API_KEY,
+                )
+                self.assertEqual(default_upstream.transport, "anthropic_messages")
+                self.assertEqual(default_upstream.path, "/messages")
+                self.assertNotIn("thinking", default_upstream.body)
+                self.assertNotIn("reasoning_effort", default_upstream.body)
+                self.assertEqual(default_upstream.body["max_tokens"], 32000)
 
     def test_history_and_tools(self):
         gateway = _load_production_module("opencode_gateway", _GATEWAY_PATH)

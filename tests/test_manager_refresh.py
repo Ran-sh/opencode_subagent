@@ -192,7 +192,7 @@ class ManagerRefreshTransactionRedTests(unittest.TestCase):
                 state_after["model_registry"], state_before["model_registry"]
             )
             registry_after = models.registry_from_snapshot(state_after["model_registry"])
-            self.assertEqual(len(registry_after), 18)
+            self.assertEqual(len(registry_after), 19)
             self.assertEqual(registry_after["hy3"].status, "unavailable")
             self.assertNotIn("unknown-go-red", registry_after)
             self.assertNotIn("unknown-meta-red", registry_after)
@@ -335,7 +335,7 @@ class ManagerRefreshTransactionRedTests(unittest.TestCase):
             self.assertIs(result["gateway_restart_required"], False)
             self.assertIs(result["new_task_required"], True)
             registry = manager.read_model_registry(paths)
-            self.assertEqual(len(registry), 18)
+            self.assertEqual(len(registry), 19)
             self.assertNotIn("unknown-go-red", registry)
             self.assertNotIn("unknown-meta-red", registry)
             self.assertEqual(registry["gpt-5.6-luna"], gpt_old)
