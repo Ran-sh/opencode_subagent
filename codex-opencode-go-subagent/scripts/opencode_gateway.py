@@ -229,6 +229,12 @@ def _validate_request(request):
         raise GatewayError("invalid_tools", 400, "tools must be a list")
     custom_names = []
     for tool in tools:
+        if (
+            isinstance(tool, dict)
+            and tool.get("type") == "web_search"
+            and "name" not in tool
+        ):
+            continue
         if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
             raise GatewayError("invalid_tool", 400, "tool must be an object with a name")
         ttype = tool.get("type")
@@ -296,6 +302,22 @@ def _normalize_developer_messages(request):
     normalized["input"] = kept_items
     if parts:
         normalized["instructions"] = "\n\n".join(parts)
+    return normalized
+
+
+def _normalize_web_search_declarations(request):
+    """Drop unnamed web_search capability declarations on a deep copy."""
+    normalized = copy.deepcopy(request)
+    source_tools = normalized.get("tools") or []
+    normalized["tools"] = [
+        tool
+        for tool in source_tools
+        if not (
+            isinstance(tool, dict)
+            and tool.get("type") == "web_search"
+            and "name" not in tool
+        )
+    ]
     return normalized
 
 
@@ -755,6 +777,7 @@ def prepare_upstream_request(
         ) from exc
     custom_tool_names = _validate_request(request)
     request = _normalize_developer_messages(request)
+    request = _normalize_web_search_declarations(request)
     request, namespace_tool_names = _normalize_namespace_tools(request)
     transport = spec.transport
     if transport == "chat_completions":
