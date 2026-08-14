@@ -71,7 +71,7 @@ Codex home 中的受管文件包括：
 - `opencode-go-subagent/state.json`：网关状态和模型快照；
 - `opencode-go-subagent/backups/`：事务备份。
 
-写入使用临时文件、原子替换、内容哈希和回滚。检测到受管文件漂移时返回 `conflict`，不会静默覆盖用户修改。
+写入使用临时文件、原子替换、内容哈希和回滚。`config.toml` 使用受管配置投影哈希：只要 provider、`OpenCode` role、`model_catalog_json` 或 `features.multi_agent` 没有变化，Codex 对其他配置的修改不会触发冲突；这些受管字段被改动时仍返回 `conflict`。模型目录、Agent 文件和状态文件继续使用完整字节哈希，不会静默覆盖用户修改。
 
 ## 5. 凭据与本地网关
 

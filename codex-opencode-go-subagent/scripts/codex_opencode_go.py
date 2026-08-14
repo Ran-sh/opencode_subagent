@@ -1085,19 +1085,92 @@ def _manifest_enabled(manifest: dict[str, Any]) -> bool:
     return enabled
 
 
-def _verify_managed_hashes(paths: Paths, manifest: dict[str, Any]) -> None:
+CONFIG_MANAGED_HASH_KEY = "config_managed_sha256"
+
+
+def _managed_config_projection(config_text: str) -> dict[str, Any]:
+    try:
+        parsed = parse_toml_text(config_text) if config_text.strip() else {}
+    except ManagerError:
+        parsed = {}
+    features = parsed.get("features") or {}
+    providers = parsed.get("model_providers") or {}
+    agents = parsed.get("agents") or {}
+    return {
+        "model_catalog_json": parsed.get("model_catalog_json"),
+        "features": {"multi_agent": features.get("multi_agent")},
+        "model_providers": {"opencode-go": providers.get(PROVIDER) or {}},
+        "agents": {"OpenCode": agents.get(ROLE) or {}},
+    }
+
+
+def _managed_config_sha256(config_text: str) -> str:
+    projection = _managed_config_projection(config_text)
+    canonical = json.dumps(
+        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return sha256_bytes(canonical)
+
+
+def _expected_managed_config_projection(paths: Paths, enabled: bool = True) -> dict[str, Any]:
+    state_payload = _parse_state_payload(json.loads(read_utf8_text(paths.state)))
+    port = state_payload["port"]
+    provider_parsed = parse_toml_text(managed_provider_block(paths, port))
+    provider = (provider_parsed.get("model_providers") or {}).get(PROVIDER) or {}
+    role: dict[str, Any] = {}
+    if enabled:
+        role_parsed = parse_toml_text(managed_role_block(paths))
+        role = (role_parsed.get("agents") or {}).get(ROLE) or {}
+    return {
+        "model_catalog_json": str(paths.catalog),
+        "features": {"multi_agent": True},
+        "model_providers": {"opencode-go": provider},
+        "agents": {"OpenCode": role},
+    }
+
+
+def _legacy_managed_config_matches(paths: Paths, manifest: dict[str, Any]) -> bool:
+    if not paths.config.is_file() or not paths.state.is_file():
+        return False
+    try:
+        expected = _expected_managed_config_projection(
+            paths, enabled=_manifest_enabled(manifest)
+        )
+        expected_bytes = json.dumps(
+            expected, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return sha256_bytes(expected_bytes) == _managed_config_sha256(
+            read_utf8_text(paths.config)
+        )
+    except Exception:
+        return False
+
+
+def _verify_managed_hashes(
+    paths: Paths,
+    manifest: dict[str, Any],
+    allow_legacy_config_projection: bool = False,
+) -> None:
     enabled = _manifest_enabled(manifest)
     drift: list[str] = []
+    config_expected = manifest.get(CONFIG_MANAGED_HASH_KEY)
+    config_ok = False
+    if isinstance(config_expected, str) and paths.config.is_file():
+        config_ok = _managed_config_sha256(read_utf8_text(paths.config)) == config_expected
+    elif paths.config.is_file():
+        config_ok = sha256_bytes(paths.config.read_bytes()) == manifest.get("config_sha256")
+        if not config_ok and allow_legacy_config_projection and _legacy_managed_config_matches(paths, manifest):
+            config_ok = True
+    if not config_ok:
+        drift.append(str(paths.config))
     if enabled:
         pairs = (
-            ("config_sha256", paths.config),
             ("catalog_sha256", paths.catalog),
             ("agent_sha256", paths.agent),
             ("state_sha256", paths.state),
         )
     else:
         pairs = (
-            ("config_sha256", paths.config),
             ("catalog_sha256", paths.catalog),
             ("state_sha256", paths.state),
         )
@@ -1128,13 +1201,19 @@ def _static_verify(paths: Paths, profile: Profile) -> None:
     if not isinstance(catalog_value, str) or Path(catalog_value).expanduser().resolve() != paths.catalog:
         raise ManagerError("not_configured", "模型目录未选中。")
     manifest = read_manifest(paths)
-    expected = {
-        "config_sha256": paths.config,
-        "catalog_sha256": paths.catalog,
-        "agent_sha256": paths.agent,
-        "state_sha256": paths.state,
-    }
-    for key, path in expected.items():
+    config_expected = manifest.get(CONFIG_MANAGED_HASH_KEY)
+    config_ok = False
+    if isinstance(config_expected, str) and paths.config.is_file():
+        config_ok = _managed_config_sha256(read_utf8_text(paths.config)) == config_expected
+    elif paths.config.is_file():
+        config_ok = sha256_bytes(paths.config.read_bytes()) == manifest.get("config_sha256")
+    if not config_ok:
+        raise ManagerError("not_configured", f"受管文件校验失败：{paths.config.name}")
+    for key, path in (
+        ("catalog_sha256", paths.catalog),
+        ("agent_sha256", paths.agent),
+        ("state_sha256", paths.state),
+    ):
         expected_hash = manifest.get(key)
         if not isinstance(expected_hash, str) or not path.is_file() or sha256_bytes(path.read_bytes()) != expected_hash:
             raise ManagerError("not_configured", f"受管文件校验失败：{path.name}")
@@ -2013,6 +2092,7 @@ def _plan_setup_candidates(
         "legacy_role_block_removed": legacy_removed,
         "adopted_existing": bool(previous_manifest) or paths.catalog.is_file() or paths.agent.is_file(),
         "config_sha256": sha256_bytes(new_config_bytes),
+        CONFIG_MANAGED_HASH_KEY: _managed_config_sha256(new_config_bytes.decode("utf-8")),
         "catalog_sha256": sha256_bytes(catalog_bytes),
         "agent_sha256": sha256_bytes(agent_bytes),
         "state_sha256": sha256_bytes(state_bytes),
@@ -2043,12 +2123,16 @@ def _plan_setup_candidates(
         files_ok = all(
             path.is_file() and sha256_bytes(path.read_bytes()) == previous_manifest.get(key)
             for key, path in (
-                ("config_sha256", paths.config),
                 ("catalog_sha256", paths.catalog),
                 ("agent_sha256", paths.agent),
                 ("state_sha256", paths.state),
             )
         )
+        config_expected = previous_manifest.get(CONFIG_MANAGED_HASH_KEY)
+        config_ok = False
+        if isinstance(config_expected, str) and paths.config.is_file():
+            config_ok = _managed_config_sha256(read_utf8_text(paths.config)) == config_expected
+        files_ok = files_ok and config_ok
         managed_ok = bool(
             previous_manifest.get("managed_provider_block")
             and previous_manifest.get("managed_agent_file")
@@ -2118,11 +2202,16 @@ def setup(
     with operation_lock(paths):
         previous_manifest = read_manifest(paths)
         if previous_manifest:
-            _verify_managed_hashes(paths, previous_manifest)
+            _verify_managed_hashes(paths, previous_manifest, allow_legacy_config_projection=True)
         backup: Path | None = None
         credential_created = False
         try:
-            profile = resolve_managed_profile(previous_manifest, paths)
+            state_registry = None
+            if previous_manifest:
+                state_registry = _parse_state_payload(
+                    json.loads(read_utf8_text(paths.state))
+                )["model_registry"]
+            profile = resolve_managed_profile(previous_manifest, paths, registry=state_registry)
             if profile is None:
                 profile = default_profile()
             if pending_secret is not None:
@@ -2215,15 +2304,22 @@ def status(paths: Paths) -> dict[str, Any]:
     enabled = True
     if manifest:
         enabled = _manifest_enabled(manifest)
+        config_ok = False
+        config_expected = manifest.get(CONFIG_MANAGED_HASH_KEY)
+        if isinstance(config_expected, str) and paths.config.is_file():
+            config_ok = _managed_config_sha256(read_utf8_text(paths.config)) == config_expected
+        elif paths.config.is_file():
+            config_ok = sha256_bytes(paths.config.read_bytes()) == manifest.get("config_sha256")
+        checks["config_sha256"] = config_ok
+        if not config_ok:
+            drift.append(str(paths.config))
         pairs = (
-            ("config_sha256", paths.config),
             ("catalog_sha256", paths.catalog),
             ("agent_sha256", paths.agent),
             ("state_sha256", paths.state),
         )
         if not enabled:
             pairs = (
-                ("config_sha256", paths.config),
                 ("catalog_sha256", paths.catalog),
                 ("state_sha256", paths.state),
             )
@@ -2281,7 +2377,7 @@ def status(paths: Paths) -> dict[str, Any]:
         "credential_present": None,
         "managed_hashes": {
             key: manifest.get(key)
-            for key in ("config_sha256", "catalog_sha256", "agent_sha256", "state_sha256")
+            for key in (CONFIG_MANAGED_HASH_KEY, "config_sha256", "catalog_sha256", "agent_sha256", "state_sha256")
         },
         "drift": drift,
         "checks": checks,
@@ -2697,6 +2793,7 @@ def disable(paths: Paths) -> dict[str, Any]:
         disabled_manifest = dict(manifest)
         disabled_manifest["enabled"] = False
         disabled_manifest["config_sha256"] = sha256_bytes(updated_bytes)
+        disabled_manifest[CONFIG_MANAGED_HASH_KEY] = _managed_config_sha256(updated)
         disabled_manifest["agent_sha256"] = None
         disabled_manifest["backup"] = str(backup)
         try:

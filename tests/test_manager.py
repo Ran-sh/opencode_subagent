@@ -853,6 +853,99 @@ class ManagerContractTests(unittest.TestCase):
             for file_path in _all_files(home):
                 self.assertNotIn(marker_bytes, file_path.read_bytes())
 
+    def test_new_manifest_unrelated_drift_keeps_status_and_helper_usable(self):
+        manager = self._manager()
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = manager.resolve_paths(str(home))
+            with mock.patch.object(manager, "credential_available", return_value=True), mock.patch.object(
+                manager, "credential_has_key", return_value=True
+            ):
+                manager.setup(
+                    paths, True, False, True, io.StringIO("ignored\n"), catalog_loader=_catalog_loader()
+                )
+            unrelated = "\n# unrelated comment\n[projects]\nfoo = \"bar\"\n"
+            paths.config.write_text(
+                paths.config.read_text(encoding="utf-8") + unrelated, encoding="utf-8"
+            )
+            result = manager.status(paths)
+            self.assertEqual(result["status"], "configured")
+            gateway_state = manager.read_gateway_state(paths)
+            self.assertIsInstance(gateway_state, dict)
+            self.assertIn("local_gateway_token", gateway_state)
+
+    def test_legacy_manifest_projection_match_adopts_managed_hash(self):
+        manager = self._manager()
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = manager.resolve_paths(str(home))
+            with mock.patch.object(manager, "credential_available", return_value=True), mock.patch.object(
+                manager, "credential_has_key", return_value=True
+            ):
+                manager.setup(
+                    paths, True, False, True, io.StringIO("ignored\n"), catalog_loader=_catalog_loader()
+                )
+            manifest_payload = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            manifest_payload.pop("config_managed_sha256", None)
+            paths.manifest.write_text(
+                json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            unrelated = "\n# unrelated comment\n[projects]\nfoo = \"bar\"\n"
+            paths.config.write_text(
+                paths.config.read_text(encoding="utf-8") + unrelated, encoding="utf-8"
+            )
+            with mock.patch.object(manager, "credential_available", return_value=True), mock.patch.object(
+                manager, "credential_has_key", return_value=True
+            ):
+                result = manager.repair(
+                    paths, True, False, True, io.StringIO("ignored\n"), catalog_loader=_catalog_loader()
+                )
+            self.assertEqual(result["status"], "configured")
+            adopted = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            self.assertIsInstance(adopted.get("config_managed_sha256"), str)
+            adopted_config = paths.config.read_text(encoding="utf-8")
+            self.assertIn("# unrelated comment", adopted_config)
+            self.assertIn("[projects]", adopted_config)
+
+    def test_setup_idempotent_under_unrelated_drift(self):
+        manager = self._manager()
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = manager.resolve_paths(str(home))
+            with mock.patch.object(manager, "credential_available", return_value=True), mock.patch.object(
+                manager, "credential_has_key", return_value=True
+            ):
+                manager.setup(
+                    paths, True, False, True, io.StringIO("ignored\n"), catalog_loader=_catalog_loader()
+                )
+            managed = (
+                paths.config,
+                paths.catalog,
+                paths.agent,
+                paths.manifest,
+                paths.state_dir / "state.json",
+            )
+            unrelated = "\n# unrelated comment\n[projects]\nfoo = \"bar\"\n"
+            paths.config.write_text(
+                paths.config.read_text(encoding="utf-8") + unrelated, encoding="utf-8"
+            )
+            before_bytes = {path: path.read_bytes() for path in managed}
+            backups_dir = paths.backups
+            backups_before = _snapshot(backups_dir) if backups_dir.exists() else {}
+            with mock.patch.object(manager, "credential_available", return_value=True), mock.patch.object(
+                manager, "credential_has_key", return_value=True
+            ):
+                second = manager.setup(
+                    paths, True, False, True, io.StringIO("ignored\n"), catalog_loader=_catalog_loader()
+                )
+            self.assertEqual(second["status"], "configured")
+            self.assertFalse(second.get("changed", False))
+            for path, data in before_bytes.items():
+                self.assertEqual(path.read_bytes(), data)
+            backups_after = _snapshot(backups_dir) if backups_dir.exists() else {}
+            self.assertEqual(backups_after, backups_before)
+            self.assertIn("# unrelated comment", paths.config.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
