@@ -3,8 +3,8 @@
 
 Deterministic, Python 3.11+ standard-library-only, read-only repository
 checker.  Validates that README.md and README.en.md form a synchronized
-pair per PKG-OC-20260813-01-V2: equal README_SYNC markers, reciprocal
-language links, the fixed ordered 13-pair H2 map, and the exact contract
+pair per PKG-OC-20260814-01-V1: equal README_SYNC markers, reciprocal
+language links, the fixed ordered 8-pair H2 map, and the exact contract
 tokens.  With ``--base <rev>``, changed paths are the union of
 ``git diff --name-only <rev> --`` and ``git ls-files --others
 --exclude-standard``; exactly one changed README fails, both or neither
@@ -39,19 +39,14 @@ _ZH_EN_LINK = '<a href="./README.en.md">English</a>'
 _EN_ZH_LINK = '<a href="./README.md">简体中文</a>'
 
 H2_PAIRS = (
-    ("五步快速开始", "Five-step quick start"),
-    ("主要功能", "Features"),
-    ("架构", "Architecture"),
-    ("安装", "Installation"),
-    ("首次配置", "Initial setup"),
-    ("日常编码派发", "Daily coding delegation"),
-    ("支持模型", "Supported models"),
-    ("模型与思考档位切换", "Switching models and reasoning effort"),
-    ("管理命令", "Management commands"),
-    ("协议与安全边界", "Protocol and security boundaries"),
-    ("验证", "Verification"),
-    ("数据来源", "Data sources"),
-    ("致谢、商标与许可", "Credits, trademarks, and license"),
+    ("项目简介", "Overview"),
+    ("核心特性", "Key features"),
+    ("快速开始", "Quick start"),
+    ("默认配置", "Default configuration"),
+    ("切换模型", "Switch models"),
+    ("原生子 Agent 调用", "Native subagent call"),
+    ("详细文档", "Technical reference"),
+    ("许可证", "License"),
 )
 
 TOKENS = (

@@ -1,6 +1,6 @@
-"""RED tests for the README synchronization checker (OC-20260813-01, REV-2).
+"""Tests for the README synchronization checker (OC-20260814-01, REV-1).
 
-Behavior contract under test (PKG-OC-20260813-01-V2):
+Behavior contract under test (PKG-OC-20260814-01-V1):
 
 - R1: ``scripts/check_readme_sync.py`` exits 0 for a synchronized pair and
   exits 1 for marker, reciprocal-link, ordered H2-section or contract-token
@@ -26,7 +26,7 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CHECKER = REPO_ROOT / "scripts" / "check_readme_sync.py"
 
-MARKER = "<!-- README_SYNC: 2026-08-13.1 -->"
+MARKER = "<!-- README_SYNC: 2026-08-14.1 -->"
 PAIR_COMMENT = ("<!-- README.md and README.en.md are maintained as "
                 "a synchronized pair. -->")
 ZH_LINK_LINE = ('  <strong>简体中文</strong> · '
@@ -35,19 +35,14 @@ EN_LINK_LINE = ('  <a href="./README.md">简体中文</a> · '
                 '<strong>English</strong>')
 
 H2_PAIRS = (
-    ("五步快速开始", "Five-step quick start"),
-    ("主要功能", "Features"),
-    ("架构", "Architecture"),
-    ("安装", "Installation"),
-    ("首次配置", "Initial setup"),
-    ("日常编码派发", "Daily coding delegation"),
-    ("支持模型", "Supported models"),
-    ("模型与思考档位切换", "Switching models and reasoning effort"),
-    ("管理命令", "Management commands"),
-    ("协议与安全边界", "Protocol and security boundaries"),
-    ("验证", "Verification"),
-    ("数据来源", "Data sources"),
-    ("致谢、商标与许可", "Credits, trademarks, and license"),
+    ("项目简介", "Overview"),
+    ("核心特性", "Key features"),
+    ("快速开始", "Quick start"),
+    ("默认配置", "Default configuration"),
+    ("切换模型", "Switch models"),
+    ("原生子 Agent 调用", "Native subagent call"),
+    ("详细文档", "Technical reference"),
+    ("许可证", "License"),
 )
 
 TOKENS = (
@@ -178,7 +173,7 @@ class ReadmeSyncCheckerTest(unittest.TestCase):
     def test_marker_mismatch_fails(self):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
-            write_pair(root, en_marker="<!-- README_SYNC: 2026-08-13.2 -->")
+            write_pair(root, en_marker="<!-- README_SYNC: 2026-08-14.2 -->")
             proc = run_checker(root)
             assert_launched(self, proc)
             assert_clean_output(self, proc, root)
